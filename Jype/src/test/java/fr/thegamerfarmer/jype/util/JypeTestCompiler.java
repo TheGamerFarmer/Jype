@@ -117,6 +117,11 @@ public final class JypeTestCompiler {
         return compileTwoPass(parentSources, childSources, true);
     }
 
+    public static Result compileTwoPassJar(Map<String, String> parentSources,
+                                           Map<String, String> childSources) throws IOException {
+        return compileTwoPass(parentSources, childSources, false, true);
+    }
+
     public static Result compileAndRun(Map<String, String> sources, String mainClass) throws Exception {
         Path root = workspace("jype-runtime-");
         try {
@@ -139,6 +144,12 @@ public final class JypeTestCompiler {
 
     private static Result compileTwoPass(Map<String, String> parentSources,
                                          Map<String, String> childSources, boolean parentUsesJype) throws IOException {
+        return compileTwoPass(parentSources, childSources, parentUsesJype, false);
+    }
+
+    private static Result compileTwoPass(Map<String, String> parentSources,
+                                         Map<String, String> childSources, boolean parentUsesJype,
+                                         boolean packageJar) throws IOException {
         Path parentRoot = workspace("jype-parent-");
         Path parentOut = Files.createDirectory(parentRoot.resolve("classes"));
         try {
@@ -147,7 +158,21 @@ public final class JypeTestCompiler {
             if (!parentResult.success) return parentResult;
 
             List<File> cp = new ArrayList<>(PLUGIN_CLASSPATH);
-            cp.add(parentOut.toFile());
+            if (packageJar) {
+                Path jar = parentRoot.resolve("library.jar");
+                try (var output = new java.util.jar.JarOutputStream(Files.newOutputStream(jar));
+                     var files = Files.walk(parentOut)) {
+                    for (Path file : files.filter(Files::isRegularFile).toList()) {
+                        output.putNextEntry(new java.util.jar.JarEntry(
+                                parentOut.relativize(file).toString().replace(File.separatorChar, '/')));
+                        Files.copy(file, output);
+                        output.closeEntry();
+                    }
+                }
+                cp.add(jar.toFile());
+            } else {
+                cp.add(parentOut.toFile());
+            }
             return run(childSources, parentUsesJype ? List.of("-Xplugin:Jype")
                             : List.of("-Xplugin:Jype", "-Xlint:rawtypes", "-Werror"),
                     cp, null);

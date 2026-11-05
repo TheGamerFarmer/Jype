@@ -17,6 +17,11 @@ public class JypeCompiledTypeSystemTest extends JypeJavaFixture {
         try {
             Path src = Files.createDirectories(workspace.resolve("src"));
             Path out = Files.createDirectories(workspace.resolve("classes"));
+            String extraParameters = java.util.stream.IntStream.range(0, 18)
+                    .mapToObj(i -> "P" + i).collect(java.util.stream.Collectors.joining(", "));
+            String extraDefinitions = java.util.stream.IntStream.range(0, 18)
+                    .mapToObj(i -> ", @fr.thegamerfarmer.jype.annotations.TypeDef(name=\"P" + i
+                            + "\", bound=Object.class)").collect(java.util.stream.Collectors.joining());
             Map<String, String> sources = Map.of(
                     "TypeDef.java", """
                             package fr.thegamerfarmer.jype.annotations;
@@ -30,12 +35,16 @@ public class JypeCompiledTypeSystemTest extends JypeJavaFixture {
                             }
                             """,
                     "Bound.java", "package compiled; public class Bound { public int count() { return 1; } }",
+                    "Master.java", "package compiled; public class Master<TYPE extends Bound> {}",
+                    "Sub.java", "package compiled; public abstract class Sub<MASTER_POWER extends Master<TYPE>, "
+                            + "TYPE extends Bound, " + extraParameters + "> { public MASTER_POWER master() { return null; } }",
                     "package-info.java", """
                             @fr.thegamerfarmer.jype.annotations.TypeSystem({
                                 @fr.thegamerfarmer.jype.annotations.TypeDef(name="TYPE", bound=compiled.Bound.class)
+                            %s
                             })
                             package compiled;
-                            """);
+                            """.formatted(extraDefinitions));
             for (var entry : sources.entrySet()) Files.writeString(src.resolve(entry.getKey()), entry.getValue());
             String compiler = Path.of(System.getProperty("jype.test.jdk"), "bin",
                     System.getProperty("os.name").startsWith("Windows") ? "javac.exe" : "javac").toString();
@@ -49,7 +58,40 @@ public class JypeCompiledTypeSystemTest extends JypeJavaFixture {
             }
             assertEquals(Files.readString(log), 0, javac.exitValue());
             PsiTestUtil.addLibrary(getTestRootDisposable(), getModule(), "jype-test-library", workspace.toString(), "classes");
+            PsiFile completion = define("suggestions", "inherit=\"<caret>\"");
+            myFixture.configureFromExistingVirtualFile(completion.getVirtualFile());
+            var variants = myFixture.complete(com.intellij.codeInsight.completion.CompletionType.BASIC);
+            assertTrue(variants == null
+                    ? myFixture.getFile().getText().contains("inherit=\"compiled\"")
+                    : java.util.Arrays.stream(variants).anyMatch(item -> item.getLookupString().equals("compiled")));
+            completion = define("overrideSuggestions", """
+                    inherit="compiled", overrides=
+                        @fr.thegamerfarmer.jype.annotations.TypeDef(name="<caret>", bound=Object.class)
+                    """);
+            myFixture.configureFromExistingVirtualFile(completion.getVirtualFile());
+            variants = myFixture.complete(com.intellij.codeInsight.completion.CompletionType.BASIC);
+            assertTrue(variants == null
+                    ? myFixture.getFile().getText().contains("name=\"TYPE\"")
+                    : java.util.Arrays.stream(variants).anyMatch(item -> item.getLookupString().equals("TYPE")));
             define("consumer", "inherit=\"compiled\"");
+            myFixture.addClass("package consumer; public class BGMaster extends compiled.Master {}");
+            PsiFile inheritance = myFixture.addFileToProject("consumer/BGSub.java", """
+                    package consumer;
+                    public abstract class BGSub<MASTER_POWER extends BGMaster>
+                            extends compiled.Sub<MASTER_POWER> {
+                        MASTER_POWER power() { return master(); }
+                    }
+                    """);
+            myFixture.configureFromExistingVirtualFile(inheritance.getVirtualFile());
+            myFixture.checkHighlighting(false, false, false);
+            inheritance = myFixture.addFileToProject("consumer/WrongSub.java", """
+                    package consumer;
+                    public abstract class WrongSub extends compiled.Sub<String> {}
+                    """);
+            myFixture.configureFromExistingVirtualFile(inheritance.getVirtualFile());
+            var errors = myFixture.doHighlighting(com.intellij.lang.annotation.HighlightSeverity.ERROR);
+            assertTrue(errors.toString(), errors.stream().anyMatch(info -> info.getDescription() != null
+                    && info.getDescription().startsWith("[Jype] Type argument String does not satisfy bound")));
             PsiClass cls = myFixture.addClass("package consumer; public class Consumer {}");
             assertEquals("compiled.Bound", JypeTypeSystemReader.getTypeDefMap(cls).get("TYPE").boundFqn());
             PsiFile file = myFixture.addFileToProject("compiled/deep/Consumer.java", """

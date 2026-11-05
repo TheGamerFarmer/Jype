@@ -31,7 +31,7 @@ final class SourceTypeResolver {
 
     /**
      * Returns a canonical source name, or {@code null} for missing or ambiguous types.
-     * Classpath probing is optional because pre-Enter parameter orders exist only for sources.
+     * Classpath probing is optional; class-file signatures can supply pre-Enter parameter orders.
      */
     String resolve(Map<String, List<String>> index, JCTree.JCCompilationUnit unit,
                    JCTree.JCExpression expression, boolean includeClasspath) {
@@ -80,13 +80,13 @@ final class SourceTypeResolver {
         });
     }
 
-    /** Reads class signatures for static lowering; an absent class is not a read failure. */
+    /** Reads class signatures without loading classes; an absent class is not a read failure. */
     TypeSystemClassFileReader.ClassData readClass(String qualifiedName) {
         try {
             JavaFileObject file = findClass(qualifiedName);
             return file == null ? null : TypeSystemClassFileReader.readClass(file);
         } catch (IOException exception) {
-            throw new IllegalStateException("[Jype] Cannot read static signatures for " + qualifiedName, exception);
+            throw new IllegalStateException("[Jype] Cannot read class signatures for " + qualifiedName, exception);
         }
     }
 

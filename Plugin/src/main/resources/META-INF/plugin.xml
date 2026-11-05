@@ -10,8 +10,10 @@
     <ul>
       <li>Resolution of types declared by @TypeSystem and its inherited systems</li>
       <li>Completion for resolved types</li>
+      <li>Completion for inherited packages and overridden type names</li>
       <li>Renaming declarations and their usages, with undo support</li>
       <li>Annotation diagnostics and cast analysis based on bounds</li>
+      <li>Partial generic inheritance diagnostics for source and compiled libraries</li>
       <li>Structural configuration of the local Maven POM, with undo support</li>
     </ul>
     The engine is still required for compilation. The editor's virtual types
@@ -30,6 +32,12 @@
         implementation="fr.thegamerfarmer.jype.plugin.JypeTypeRenameProcessor" order="first"/>
     <projectViewNodeDecorator
         implementation="fr.thegamerfarmer.jype.plugin.JypePackageInfoDecorator"/>
+    <editorTabTitleProvider
+        implementation="fr.thegamerfarmer.jype.plugin.JypePackageInfoPresentation"/>
+    <fileIconProvider
+        implementation="fr.thegamerfarmer.jype.plugin.JypePackageInfoPresentation"/>
+    <completion.contributor language="JAVA" order="first"
+        implementationClass="fr.thegamerfarmer.jype.plugin.JypeAnnotationCompletionContributor"/>
 
     <daemon.highlightInfoFilter
         implementation="fr.thegamerfarmer.jype.plugin.JypeHighlightFilter"/>

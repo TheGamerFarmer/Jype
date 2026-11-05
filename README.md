@@ -81,9 +81,6 @@ dependency and processor path:
                 <version>1.0.0</version>
             </path>
         </annotationProcessorPaths>
-        <annotationProcessors>
-            <annotationProcessor>fr.thegamerfarmer.jype.JypeProcessorShim</annotationProcessor>
-        </annotationProcessors>
     </configuration>
 </plugin>
 ```
@@ -111,9 +108,13 @@ explicit options avoid relying on Unsafe and restrictive JVM policies.
 
 ### Other processors, scopes and verification
 
-If using Lombok or another processor, **retain it in both explicit lists**:
-add its dependency to `annotationProcessorPaths` and its processor class to
-`annotationProcessors`. For Lombok, that class is
+The processor is discovered from the JAR's service descriptor on the explicit
+processor path; an `<annotationProcessors>` list is not required.
+If using Lombok or another processor, retain its dependency in
+`annotationProcessorPaths`. If your build already selects processors explicitly
+with `<annotationProcessors>`, include Jype's
+`fr.thegamerfarmer.jype.JypeProcessorShim` and all other required processor classes.
+For Lombok, that class is
 `lombok.launch.AnnotationProcessorHider$AnnotationProcessor`; select a Lombok
 version compatible with the compiler JDK. Replacing the processor path/list
 with Jype alone disables discovery of other processors. `-proc:none` disables

@@ -8,18 +8,27 @@ import com.intellij.psi.*;
 import org.jetbrains.annotations.NotNull;
 
 /**
- * Reports declaration-wide validation errors instead of exposing a partial alias mapping.
+ * Reports invalid declarations and bound violations in completed partial inheritance arguments.
  * This stateless daemon annotator reads PSI under platform read access and skips indexing.
  */
 public final class JypeTypeSystemAnnotator implements Annotator {
     /**
-     * Attaches one error to the owning package annotation, never to its nested TypeDef values.
+     * Checks partial inheritance bounds and attaches declaration errors to the package annotation.
      *
      * @param element PSI element currently visited by the daemon
      * @param holder annotation sink for this pass
      */
     @Override
     public void annotate(@NotNull PsiElement element, @NotNull AnnotationHolder holder) {
+        if (element instanceof PsiJavaCodeReferenceElement reference) {
+            JypeInheritanceArguments.Completion completion = JypeInheritanceArguments.complete(reference);
+            if (completion != null) {
+                for (JypeInheritanceArguments.Problem problem : completion.problems()) {
+                    holder.newAnnotation(HighlightSeverity.ERROR, problem.message()).range(problem.element()).create();
+                }
+            }
+            return;
+        }
         if (!(element instanceof PsiAnnotation annotation)
                 || !(annotation.getContainingFile() instanceof PsiJavaFile file)
                 || !"package-info.java".equals(file.getName())

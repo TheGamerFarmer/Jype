@@ -19,6 +19,7 @@ final class SourceHierarchy {
     final SourceTypeResolver typeResolver;
     private final Log log;
     private final Set<String> reportedConcreteConflicts = new HashSet<>();
+    private final Map<String, List<String>> compiledParameters = new HashMap<>();
 
     /** Creates the canonical index and task-local classpath resolver. */
     SourceHierarchy(JavaFileManager fileManager, Log log) {
@@ -73,12 +74,17 @@ final class SourceHierarchy {
         typeParamMap.put(classFqn, params);
     }
 
-    /** Returns source parameter order, or null when the expression does not resolve uniquely to source. */
+    /** Returns source or class-file parameter order without loading classes before Enter. */
     List<String> resolveTypeParams(Map<String, List<String>> typeParamMap,
                                            JCTree.JCCompilationUnit cu,
                                            JCTree.JCExpression typeExpr) {
-        String resolved = resolveTypeName(typeParamMap, cu, typeExpr, false);
-        return resolved == null ? null : typeParamMap.get(resolved);
+        String resolved = resolveTypeName(typeParamMap, cu, typeExpr, true);
+        if (resolved == null) return null;
+        if (typeParamMap.containsKey(resolved)) return typeParamMap.get(resolved);
+        return compiledParameters.computeIfAbsent(resolved, name -> {
+            var data = typeResolver.readClass(name);
+            return data == null ? null : data.parameters();
+        });
     }
 
     /** Delegates canonical name resolution while retaining the caller's current live source index. */

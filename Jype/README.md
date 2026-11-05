@@ -10,7 +10,7 @@ This guide describes using the engine in an already configured compilation.
 Editor integration is documented in the IntelliJ module README.
 
 For a complete Maven consumer setup (repository, dependency, compiler plugin,
-processor path/list and compiler JVM options), follow
+processor path and compiler JVM options), follow
 [Maven installation](../README.md#using-the-engine-from-maven). Adding the
 dependency or installing the IDE plugin alone does not activate compilation.
 
@@ -131,6 +131,13 @@ abstract class ClickListener<PLAYER, GROUP> extends Listener<ClickEvent> {}
 The `ClickEvent` argument remains in the `E` position; Jype fills the `PLAYER`
 and `GROUP` positions. An invalid number of arguments is not "fixed" by
 removing user-supplied arguments.
+
+Completion also reads the generic signatures of separately compiled classes
+from the classpath, before javac validates arity. Consumers of a Jype library
+can therefore omit its managed arguments in an `extends` clause while supplying
+ordinary arguments explicitly, including a parameter shared by name with their
+own class. The consumer must inherit the library's type system and run both
+the javac plugin and the processor.
 
 A template that owns only some managed parameters can receive the missing ones.
 Abstract classes also allow propagation from a generic superclass. A concrete

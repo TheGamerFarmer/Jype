@@ -52,8 +52,16 @@ declaration from a library, or one whose name is a constant, must be renamed in
 its source; the plugin refuses to modify it as an editable string.
 
 In the project tree, a `package-info.java` with Jype's `@TypeSystem` is shown as
-`package-info` with the small Jype icon. Its on-disk name remains
+`package-info` with the small Jype icon, including in the editor tab. Its on-disk name remains
 `package-info.java`; other files are displayed as before.
+
+Inside `@TypeSystem(inherit = "...")`, basic completion (`Ctrl+Space`) suggests
+visible packages declaring valid type systems, including library declarations.
+It excludes the current package and choices that would introduce an inheritance
+cycle. Inside an override's `@TypeDef(name = "...")`, it suggests names from the
+inherited system, excluding names already overridden in that declaration.
+These suggestions respect the file's module scope and wait for indexing;
+ordinary strings and standalone type definitions keep normal Java completion.
 
 ## Java analysis
 
@@ -61,6 +69,14 @@ Member completion relies on PSI inheritance from the bound, including members
 provided by other plugins such as Lombok. The plugin no longer globally
 suppresses errors mentioning `API_*`: unresolved calls, type incompatibilities,
 and nullability warnings remain visible.
+
+Partial `extends` and `implements` arguments are recognized using Jype's
+shared-name and trailing-managed-parameter rules, including classes from
+compiled libraries. The IDE does not report a false generic arity error when
+the missing arguments can be supplied by a valid visible type system.
+Bounds are checked against the completed argument list; incompatible explicit
+arguments or overridden bounds still produce errors. Missing ordinary arguments,
+extra arguments and code outside a valid type system retain Java diagnostics.
 
 Cast analysis accounts for concrete aliases: a cast such as
 `(API_PLAYER) new APIPlayer()` does not receive a false `ClassCastException`
@@ -70,8 +86,8 @@ other diagnostics. Genuine generic parameters, ordinary Java classes, and
 casts to a narrower bound are not exempt.
 
 **Limitation:** virtual classes provide a view of bounds, not a complete
-execution of the engine's AST transformations. Partial generics and some
-F-bounded relationships can therefore still produce IDE diagnostics that
+execution of the engine's AST transformations. Propagation of implicit parameters
+through inherited member signatures and some F-bounded relationships can still produce IDE diagnostics that
 differ from javac. Resolving a name successfully does not guarantee that the
 code compiles; the build with the engine remains authoritative.
 

@@ -1,0 +1,114 @@
+plugins {
+    id 'java'
+    id 'jacoco'
+    id 'org.jetbrains.intellij' version '1.17.4'
+}
+
+group = 'fr.thegamerfarmer.jype.plugin'
+version = '1.0-SNAPSHOT'
+
+repositories {
+    mavenCentral()
+}
+
+intellij {
+    version = '2024.1.7'
+    type = 'IC'
+    plugins = ['java']
+}
+
+dependencies {
+    testImplementation 'junit:junit:4.13.2'
+}
+
+processResources {
+    from('..') {
+        include 'LICENSE', 'NOTICE'
+        into 'META-INF'
+    }
+}
+
+tasks.withType(JavaCompile).configureEach {
+    sourceCompatibility = '17'
+    targetCompatibility = '17'
+}
+
+patchPluginXml {
+    sinceBuild = '241'
+    untilBuild = ''
+}
+
+test {
+    systemProperty 'java.awt.headless', 'true'
+    systemProperty 'jype.test.jdk', System.getProperty('java.home')
+    finalizedBy jacocoTestReport
+    jacoco {
+        includeNoLocationClasses = true
+        includes = ['fr.thegamerfarmer.jype.plugin.*']
+    }
+    // Measure authored bytecode, not the IDE compiler's generated null-contract checks.
+    doFirst {
+        def instrumentedMain = layout.buildDirectory.dir('instrumented/instrumentCode').get().asFile
+        classpath = files(classpath.files.findAll { it != instrumentedMain }, sourceSets.main.output.classesDirs)
+    }
+}
+
+jacoco {
+    toolVersion = '0.8.14'
+}
+
+jacocoTestReport {
+    dependsOn test
+    reports {
+        xml.required = true
+        html.required = true
+    }
+}
+
+jacocoTestCoverageVerification {
+    dependsOn jacocoTestReport
+    classDirectories.setFrom(jacocoTestReport.classDirectories)
+    violationRules {
+        rule {
+            limit {
+                counter = 'LINE'
+                minimum = 0.80
+            }
+            limit {
+                counter = 'BRANCH'
+                minimum = 0.80
+            }
+        }
+    }
+}
+
+check.dependsOn jacocoTestCoverageVerification, javadoc
+
+buildSearchableOptions {
+    enabled = false // This plugin does not contribute a settings page.
+}
+
+jarSearchableOptions {
+    enabled = false
+}
+
+buildPlugin {
+    exclude '**/searchableOptions-*.jar'
+}
+
+runPluginVerifier {
+    if (project.hasProperty('jypeVerifierIde')) {
+        localPaths = [file(project.property('jypeVerifierIde'))]
+        ideVersions = []
+    }
+}
+
+signPlugin {
+    certificateChain = System.getenv('CERTIFICATE_CHAIN')
+    privateKey = System.getenv('PRIVATE_KEY')
+    password = System.getenv('PRIVATE_KEY_PASSWORD')
+}
+
+publishPlugin {
+    token = System.getenv('PUBLISH_TOKEN')
+}

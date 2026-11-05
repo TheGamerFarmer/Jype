@@ -1,0 +1,45 @@
+name: IntelliJ plugin
+
+on:
+  push:
+    paths:
+      - 'Plugin/**'
+      - 'LICENSE'
+      - 'NOTICE'
+      - '.github/workflows/plugin.yml'
+  pull_request:
+    paths:
+      - 'Plugin/**'
+      - 'LICENSE'
+      - 'NOTICE'
+      - '.github/workflows/plugin.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: Plugin
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Test and package
+        run: bash gradlew --no-daemon check buildPlugin verifyPlugin
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: jype-intellij-coverage
+          path: Plugin/build/reports/jacoco/test/
+          if-no-files-found: warn
+      - uses: actions/upload-artifact@v4
+        with:
+          name: jype-intellij-plugin
+          path: Plugin/build/distributions/*.zip
+          if-no-files-found: error

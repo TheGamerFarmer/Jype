@@ -1,0 +1,103 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    working-directory: Jype
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        java: ['21', '25']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: ${{ matrix.java }}
+          cache: maven
+          cache-dependency-path: Jype/pom.xml
+      - name: Test and package with the executing JDK
+        run: mvn --batch-mode --no-transfer-progress clean verify
+      - name: Preserve coverage and API documentation
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: jype-reports-java${{ matrix.java }}
+          path: |
+            Jype/target/site/jacoco/
+            Jype/target/reports/apidocs/
+            Jype/target/surefire-reports/
+          if-no-files-found: warn
+      - name: Verify incremental compilation with existing SPI descriptors
+        run: |
+          touch src/main/java/fr/thegamerfarmer/jype/JypeModuleOpener.java
+          mvn --batch-mode --no-transfer-progress -DskipTests package
+      - name: Publish the Java 21 artifact for consumer checks
+        if: matrix.java == '21'
+        uses: actions/upload-artifact@v4
+        with:
+          name: jype-java21
+          path: Jype/target/Jype-*.jar
+          if-no-files-found: error
+
+  java21-artifact-consumer:
+    needs: test
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        java: ['21', '25']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: ${{ matrix.java }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: jype-java21
+          path: Jype/compatibility/artifact
+      - name: Consume the Java 21 JAR without rebuilding it
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p compatibility/src/smoke compatibility/auto compatibility/explicit
+          cat > compatibility/src/smoke/package-info.java <<'JAVA'
+          @fr.thegamerfarmer.jype.annotations.TypeSystem({
+              @fr.thegamerfarmer.jype.annotations.TypeDef(name = "TYPE", bound = String.class)
+          })
+          package smoke;
+          JAVA
+          cat > compatibility/src/smoke/Consumer.java <<'JAVA'
+          package smoke;
+          class Base<TYPE> { TYPE value; }
+          class Consumer extends Base {}
+          class Generic<A, B> {}
+          class Partial<A> extends Generic<String> {}
+          JAVA
+          jars=(compatibility/artifact/Jype-*.jar)
+          test "${#jars[@]}" -eq 1
+          jar="${jars[0]}"
+          javap -verbose -classpath "$jar" fr.thegamerfarmer.jype.JypePluginShim | grep 'major version: 65'
+          common=(-cp "$jar" -processorpath "$jar" -Xplugin:Jype
+                  -processor fr.thegamerfarmer.jype.JypeProcessorShim -Xlint:rawtypes -Werror)
+          javac "${common[@]}" -d compatibility/auto compatibility/src/smoke/*.java
+          flags=()
+          for pkg in api code model processing tree util; do
+            flags+=("-J--add-exports=jdk.compiler/com.sun.tools.javac.$pkg=ALL-UNNAMED")
+          done
+          flags+=("-J--add-opens=jdk.compiler/com.sun.tools.javac.code=ALL-UNNAMED")
+          if [[ "${{ matrix.java }}" == '25' ]]; then
+            flags+=("-J--sun-misc-unsafe-memory-access=deny")
+          fi
+          javac "${flags[@]}" "${common[@]}" -d compatibility/explicit compatibility/src/smoke/*.java

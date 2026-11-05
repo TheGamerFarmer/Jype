@@ -1,0 +1,53 @@
+<idea-plugin>
+  <id>fr.thegamerfarmer.jype.plugin</id>
+  <name>Jype</name>
+  <version>1.0-SNAPSHOT</version>
+  <vendor>TheGamerFarmer</vendor>
+
+  <description><![CDATA[
+    IntelliJ support for Jype, the javac extension that propagates generic
+    parameters declared at the package level.<br/>
+    <ul>
+      <li>Resolution of types declared by @TypeSystem and its inherited systems</li>
+      <li>Completion for resolved types</li>
+      <li>Renaming declarations and their usages, with undo support</li>
+      <li>Annotation diagnostics and cast analysis based on bounds</li>
+      <li>Structural configuration of the local Maven POM, with undo support</li>
+    </ul>
+    The engine is still required for compilation. The editor's virtual types
+    represent bounds, not all compiler transformations.
+    <br/>Distributed under Apache License 2.0. The license text and attribution
+    notices are included in the JAR's META-INF/LICENSE and META-INF/NOTICE.
+  ]]></description>
+
+  <depends>com.intellij.modules.platform</depends>
+  <depends>com.intellij.modules.java</depends>
+
+  <extensions defaultExtensionNs="com.intellij">
+    <psi.referenceContributor language="JAVA"
+        implementation="fr.thegamerfarmer.jype.plugin.JypeTypeReferenceContributor"/>
+    <renamePsiElementProcessor
+        implementation="fr.thegamerfarmer.jype.plugin.JypeTypeRenameProcessor" order="first"/>
+    <projectViewNodeDecorator
+        implementation="fr.thegamerfarmer.jype.plugin.JypePackageInfoDecorator"/>
+
+    <daemon.highlightInfoFilter
+        implementation="fr.thegamerfarmer.jype.plugin.JypeHighlightFilter"/>
+    <annotator language="JAVA"
+        implementationClass="fr.thegamerfarmer.jype.plugin.JypeTypeSystemAnnotator"/>
+    <lang.inspectionSuppressor language="JAVA"
+        implementationClass="fr.thegamerfarmer.jype.plugin.JypeCastInspectionSuppressor"/>
+
+    <java.elementFinder
+        implementation="fr.thegamerfarmer.jype.plugin.JypePsiElementFinder"
+        order="last"/>
+
+    <java.shortNamesCache
+        implementation="fr.thegamerfarmer.jype.plugin.JypeShortNamesCache"/>
+
+    <editorNotificationProvider
+        implementation="fr.thegamerfarmer.jype.plugin.JypeNotificationProvider"/>
+
+    <postStartupActivity implementation="fr.thegamerfarmer.jype.plugin.JypeStartupActivity"/>
+  </extensions>
+</idea-plugin>

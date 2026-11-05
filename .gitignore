@@ -1,0 +1,15 @@
+# Local tools, IDE state and generated artifacts are not part of the sources.
+**/.idea/
+**/.gradle/
+**/.claude/
+**/.run/
+**/build/
+**/target/
+**/out/
+**/*.class
+**/*.jar
+!**/gradle/wrapper/gradle-wrapper.jar
+**/*.bak
+**/*.log
+**/*.iml
+**/.DS_Store

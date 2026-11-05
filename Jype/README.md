@@ -1,0 +1,324 @@
+# Jype — javac engine
+
+Jype reduces repetition of generic parameters in Java hierarchies. A type system
+declared on a package associates **parameter names** with **class or interface
+bounds**. The engine then completes declarations, generic applications, and
+their recursive bounds in the javac AST. It does not add helper classes to the
+program.
+
+This guide describes using the engine in an already configured compilation.
+Editor integration is documented in the IntelliJ module README.
+
+## Defining a type system
+
+```java
+// api/package-info.java
+@TypeSystem({
+    @TypeDef(name = "PLAYER", bound = Player.class),
+    @TypeDef(name = "GROUP", bound = Group.class)
+})
+package api;
+
+import fr.thegamerfarmer.jype.annotations.TypeDef;
+import fr.thegamerfarmer.jype.annotations.TypeSystem;
+```
+
+```java
+// api/Player.java
+package api;
+
+public abstract class Player {
+    public GROUP group;
+    public abstract PLAYER self();
+}
+```
+
+```java
+// api/Group.java
+package api;
+
+public abstract class Group {
+    public java.util.List<PLAYER> members;
+}
+```
+
+Using a managed name in a signature or method body triggers the addition of the
+class's missing parameters. Definition order is preserved. Here, both classes
+become two-parameter templates:
+
+```java
+abstract class Player<
+    PLAYER extends Player<PLAYER, GROUP>,
+    GROUP extends Group<PLAYER, GROUP>> { /* members preserved */ }
+```
+
+These **F-bounds** describe a coherent family: the bound of `PLAYER` refers to
+both `PLAYER` and `GROUP`. The engine therefore propagates dependencies until
+they stabilize rather than scanning the files only once. Bounds explicitly
+written by the user are preserved.
+
+## Inheriting and overriding mappings
+
+```java
+// game/package-info.java
+@TypeSystem(
+    inherit = "api",
+    overrides = {
+        @TypeDef(name = "PLAYER", bound = GamePlayer.class),
+        @TypeDef(name = "GROUP", bound = GameGroup.class)
+    }
+)
+package game;
+
+import fr.thegamerfarmer.jype.annotations.TypeDef;
+import fr.thegamerfarmer.jype.annotations.TypeSystem;
+```
+
+```java
+package game;
+
+public final class GamePlayer extends api.Player {
+    @Override public GamePlayer self() { return this; }
+}
+```
+
+```java
+package game;
+
+public final class GameGroup extends api.Group {}
+```
+
+Raw clauses are completed with the package's concrete mappings. `@TypeSystem`
+metadata is retained in `package-info.class`, allowing a separately compiled
+consumer to inherit from a library.
+
+Rules:
+
+- `value` defines a standalone type system; do not combine it with `inherit`.
+- `overrides` requires `inherit` and can replace only existing names.
+- Names are case-sensitive Java identifiers with no whitespace or keywords.
+- Duplicate names and inheritance cycles are errors, not silently ignored values.
+- A bound must be a declared type, including an interface or generic class;
+  primitives and arrays are not accepted as bounds.
+- An override is **not required to be a subtype of the previous bound**.
+  Java still checks generic constraints in the resulting hierarchy.
+- A subpackage uses the nearest annotated type system. Neighboring systems can
+  map the same name to different types without affecting each other.
+- Without a local annotation, a class can also inherit the type system of its
+  source superclass. Separate compilation requires the consumer package to
+  declare `inherit` explicitly.
+
+## Ordinary parameters, partial ownership, and references
+
+Unmanaged parameters remain under the programmer's control:
+
+```java
+package api;
+
+public abstract class Listener<PLAYER, GROUP, E> {
+    public abstract void accept(PLAYER player, E event);
+}
+
+// In another class in the same type system:
+abstract class ClickListener<PLAYER, GROUP> extends Listener<ClickEvent> {}
+```
+
+The `ClickEvent` argument remains in the `E` position; Jype fills the `PLAYER`
+and `GROUP` positions. An invalid number of arguments is not "fixed" by
+removing user-supplied arguments.
+
+A template that owns only some managed parameters can receive the missing ones.
+Abstract classes also allow propagation from a generic superclass. A concrete
+class that already supplies all mappings remains concrete: the engine must not
+arbitrarily turn it into a new generic template.
+
+Completion covers, among other cases:
+
+| Surface | Comportement |
+|---|---|
+| Source superclasses | Raw/partial clauses completed before Enter |
+| Compiled superclasses | Package metadata and parameters read during processing |
+| Member classes | Recursive processing, resolution by qualified names |
+| Fields and signatures | Managed arguments added to partial types when their order is known |
+| Local types in methods | Detection in blocks, loops, switch statements, lambdas, and anonymous bodies |
+| Generic bounds | Dependencies propagated; explicit bounds preserved |
+| Nested wildcards | Missing arguments completed when their declaration is known |
+| Imports | Explicit imports, wildcard imports, and member types; no arbitrary choice when ambiguous |
+
+ A method parameter such as `<PLAYER>` shadows the class's managed name.
+A **value** identifier named `PLAYER`, or a qualified class `other.PLAYER`, must
+not trigger parameter injection. Ordinary generics and genuine raw usages
+without managed context remain normal Java constructs; Jype does not replace
+javac inference.
+
+## Static members: shared storage, generic views
+
+```java
+package api;
+
+public class Registry {
+    @lombok.Getter @lombok.Setter
+    private static java.util.Map<String, PLAYER> players =
+        new java.util.HashMap<>();
+
+    static PLAYER first(PLAYER fallback) {
+        return players.getOrDefault("first", fallback);
+    }
+}
+```
+
+Java normally prohibits class type variables in static members. Jype lowers
+static storage to an erased type, then creates view methods whose type
+parameters belong **to the method**. Contextual accesses, direct assignments,
+and static calls use these views. Ordinary parameters already declared on a
+static method remain independent.
+
+**There is one storage location per loaded class, not one per generic mapping.**
+Two consumers using incompatible mappings can cause a cast failure at runtime.
+The engine emits a shared-storage warning; it provides no isolation,
+synchronization, or additional runtime type checks. Avoid this model when
+incompatible families must coexist; use an instance registry instead.
+
+Standard Lombok `@Getter` / `@Setter` accessors with `AccessLevel` are supported,
+including package/protected/private levels and `NONE`. A `final` field does not
+receive a setter. Explicit accessors are not duplicated. Lazy variants,
+`onMethod`/`onParam`, and custom `@Accessors` names on these fields are rejected;
+write an explicit static method for these cases.
+
+Static imports, inherited fields, and compiled generic signatures are tested.
+Overloads with incompatible generic parameter orders do not provide a reliable
+order for automatic rewriting. Ordinary class parameters remain illegal in a
+static context.
+
+## Compiler execution and processor coexistence
+
+Full operation requires **both components**:
+
+- `-Xplugin:Jype` enables transformations before Enter;
+- `fr.thegamerfarmer.jype.JypeProcessorShim` runs passes after Enter.
+
+The processor alone runs too late to fix some partial arities. The plugin alone
+does not perform all bound injections or create Javadoc copies. Each incomplete
+configuration produces an explanatory warning. `-proc:none` disables the
+processor, not a plugin requested with `-Xplugin:Jype`.
+
+If an explicit processor list or processor path is used, include Jype **and**
+the other required processors. Declaring an explicit path can disable implicit
+discovery of others. Jype returns `false` from `process` and does not claim
+exclusive ownership of its annotation. Lombok is tested with transformed
+signatures; any other processor that modifies the same trees must be validated
+in its actual configuration.
+
+The JAR must be visible to both the plugin loader and the processor loader. On
+JDKs that do not discover processors implicitly, select them explicitly.
+`--add-exports` / `--add-opens` are options for the **JVM running javac**, not an
+alternative to selecting the processor. `consumer.jvm.config` lists the
+required exports and opens. With the `javac` launcher, prefix JVM options with
+`-J`; with an embedded compiler, pass them to its host JVM.
+
+The shims check exports/opens before loading internal classes. When explicit
+options are complete, no automatic use of Unsafe is needed. Otherwise, an
+automatic opening is attempted; a JDK or policy that prohibits it produces an
+error listing the expected options. This internal mechanism does not guarantee
+compatibility with future JDKs.
+
+## Javadoc sources
+
+After a successful final round, the processor writes copies to
+`jype-javadoc-src`, next to the CLASS_OUTPUT directory. For a standard Maven
+build: `target/jype-javadoc-src`.
+
+The original sources are never modified. The patcher uses syntax positions to
+preserve comments, strings, dimension annotations, and ordinary arguments.
+Paths follow the declared package, including for generated or in-memory
+sources. Missing parameters in a scope become wildcards when appropriate; a
+genuine raw usage with no managed parameters available remains raw.
+
+Use these copies as input to the Javadoc tool, not the original abbreviated
+sources. A generation failure is a warning separate from compilation. Invalid
+files, duplicate destinations, and ambiguous imports are not guessed
+silently. Do not treat old copies as the result of a failed compilation: they
+are not regenerated when javac reports an error.
+
+## Diagnostics
+
+| Symptom | Check |
+|---|---|
+| Wrong number of arguments before annotation processing | Check that `-Xplugin:Jype` is enabled in the javac actually being used |
+| Parameters exist but bound members cannot be found | Check that `JypeProcessorShim` runs and that names match |
+| `IllegalAccessError` / inaccessible javac field | Apply `consumer.jvm.config` options to the compiler JVM |
+| Parent or annotation not found | Check the classpath and the library's `package-info.class` |
+| Another processor no longer runs | Check the explicit processor list/path, not only Jype |
+| Static storage warning | Check that only one compatible family uses the storage |
+| Javadoc copies missing | Check the final round, earlier errors, and CLASS_OUTPUT |
+| IDE/compilation differ | The IDE is an assistance view; validate with the actual compiler |
+
+`-Ajype.debug=true` enables detailed processor diagnostics. When reporting an
+issue, provide JDK versions, compiler options, a minimal example with
+`package-info.java`, and complete diagnostics, without secrets.
+
+## License
+
+The engine is distributed under [Apache License 2.0](../LICENSE), like the IDE
+plugin. Copyright 2026 TheGamerFarmer and Jype contributors. See
+[NOTICE](../NOTICE) for attributions and [LICENSING.md](../LICENSING.md) for a
+summary of rights, obligations, and dependency licenses. The distributed JAR
+includes the license text and attribution notices.
+
+## Architecture
+
+| Component | Responsibility |
+|---|---|
+| `JypePlugin` | Collects PARSE events and triggers one transformation at the first Enter |
+| `PreEnterTransformer` | Coordinates pre-Enter collaborators and isolates type systems |
+| `SourceHierarchy` | Canonical index of declarations and concrete mappings per type system |
+| `ParsedTypeSystems` | Reads managed names before symbols exist |
+| `SourceTypeResolver` | Lexical/import resolution and classpath probing without loading classes |
+| `ManagedTypeUsage` | Detects names only in type positions |
+| `ManagedParameters` / `ManagedParameterPropagation` | Injects class parameters and propagates dependencies to a fixed point |
+| `InheritanceCompletion` / `BoundTypeCompletion` / `MemberTypeCompletion` | Separately completes inheritance, bounds, and member signatures |
+| `PreEnterTrees` / `TypeArgumentCompletion` | Builds trees without symbols and preserves user arguments |
+| `StaticBoundResolver` / `StaticOwners` | Package bounds and metadata for inherited/compiled static owners |
+| `StaticTypeSupport` / `StaticAccessRewriter` | Lowers static declarations, then rewrites accesses while tracking local scopes |
+| `JypeProcessor` | Coordinates rounds and selects a type system for each root |
+| `TypeSystemResolver` | Validates annotations and resolves TypeMirrors |
+| `TypeParamInjector` | Adds missing parameters to AST, symbols, and scope after Enter |
+| `TypeInjectionPass` | Adds recursive bounds and field/superclass arguments after Enter |
+| `ProcessorTypeArguments` | Adds mixed arguments after Enter, tracking injections and existing TypeVars |
+| `JavadocSourceGenerator` | Collects and writes copies at the end of processing |
+| `JavadocSourcePatcher` / `JavadocPatchCollector` / `JavadocTypeScope` | Separates parsing/tokenization, insertion collection, and lexical resolution |
+| `TypeSystemClassFileReader` | Metadata and signatures for separate compilation |
+| Shims and `JypeModuleOpener` | Loading boundary and access to javac internals |
+
+Trees, symbols, project caches, and TypeMirrors remain local to a compilation
+task. Pre-Enter passes must not create symbols that Enter will create later.
+Post-Enter passes must keep ASTs and symbols synchronized.
+
+## Development and validation
+
+**JDK 21 minimum.** The suites run with JDK 21 and 25. The engine depends on
+javac internals and is compiled with the JDK it targets. Build the Java 21
+distribution with **JDK 21**, not with `--release 21` from JDK 25. A build run
+under JDK 25 produces Java 25 classes.
+
+From this module:
+
+```powershell
+mvn -B clean verify
+mvn -B "-Dtest=JypeStaticTest,ManagedTypeUsageTest" test
+mvn -B javadoc:javadoc
+```
+
+`verify` runs real compilation tests, runtime verification programs, separate
+compilation scenarios, and Javadoc tests. It also generates engine
+documentation (including internal members) with doclint to check syntax and
+links; `javadoc:javadoc` reruns that step alone. Documentation is written to
+`target/reports/apidocs`. JaCoCo 0.8.14 measures **all production classes**,
+without exclusions, and enforces **80% line and 80% branch coverage at the
+module level**. HTML and XML reports are in `target/site/jacoco`; test
+diagnostics are in `target/surefire-reports`. Test workspaces are confined to
+`target` and cleaned up afterward.
+
+Compatibility scenarios specific to one JDK version may be skipped on the
+other; shared behavior assertions remain active. Changes to javac internals
+must be checked on both JDKs, not only by compiling the public annotations.

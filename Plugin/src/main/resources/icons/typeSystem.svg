@@ -1,0 +1,10 @@
+<svg width="16" height="16" viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <path d="M32 8V4H24V8H16V4H8V8H4V36H16V32C16 26.7 24 26.7 24 32V36H36V8H32Z" fill="url(#jype)"/>
+    <defs>
+        <linearGradient id="jype" x1="4" y1="4" x2="36" y2="36" gradientUnits="userSpaceOnUse">
+            <stop stop-color="#3BEA62"/>
+            <stop offset=".5" stop-color="#3C99CC"/>
+            <stop offset="1" stop-color="#6B57FF"/>
+        </linearGradient>
+    </defs>
+</svg>

@@ -36,7 +36,11 @@ public final class JypeTypeSystemAnnotator implements Annotator {
         JypeTypeSystemReader.Result system = JypeTypeSystemReader.findTypeSystem(
                 element.getProject(), file.getPackageName(), element.getResolveScope());
         if (system != null && system.declaration().equals(annotation) && system.error() != null) {
-            holder.newAnnotation(HighlightSeverity.ERROR, system.error()).range(annotation).create();
+            var diagnostic = holder.newAnnotation(HighlightSeverity.ERROR, system.error()).range(annotation);
+            if (JypeTypeSystemResolver.MISSING_INHERIT.equals(system.error())) {
+                diagnostic.withFix(new JypeAddInheritFix(annotation));
+            }
+            diagnostic.create();
         }
     }
 }

@@ -120,6 +120,20 @@ public class JypeAnnotationCompletionTest extends JypeJavaFixture {
         assertFalse(names.toString(), names.contains("PLAYER"));
     }
 
+    public void testAbsentParentHasNoOverrideSuggestions() {
+        parent();
+        assertEmpty(complete("""
+                overrides=@fr.thegamerfarmer.jype.annotations.TypeDef(name="<caret>", bound=Object.class)
+                """));
+    }
+
+    public void testEmptyParentHasNoOverrideSuggestions() {
+        parent();
+        assertEmpty(complete("""
+                inherit="", overrides=@fr.thegamerfarmer.jype.annotations.TypeDef(name="<caret>", bound=Object.class)
+                """));
+    }
+
     public void testImportedAnnotationsAndQualifiedPackagePrefix() {
         objectSystem("fr.example.api", "PLAYER");
         objectSystem("fr.example.other", "ROLE");

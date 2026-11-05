@@ -65,8 +65,16 @@ class TypeSystemResolver {
 
         Map<String, TypeMirror> result = new LinkedHashMap<>();
         String parentPackage = ts.inherit();
-        if ((!parentPackage.isEmpty() && ts.value().length > 0)
-                || (parentPackage.isEmpty() && ts.overrides().length > 0)) {
+        boolean declaresOverrides = pkg.getAnnotationMirrors().stream()
+                .filter(annotation -> annotation.getAnnotationType().toString().equals(TypeSystem.class.getName()))
+                .anyMatch(annotation -> annotation.getElementValues().keySet().stream()
+                        .anyMatch(attribute -> attribute.getSimpleName().contentEquals("overrides")));
+        if (parentPackage.isEmpty() && declaresOverrides) {
+            reportError("[Jype] @TypeSystem overrides require non-empty inherit, even when overrides is empty.", pkg);
+            resolving.remove(packageName);
+            return null;
+        }
+        if (!parentPackage.isEmpty() && ts.value().length > 0) {
             reportError("[Jype] @TypeSystem must use either value, or inherit with optional overrides; "
                     + "definitions must not be silently ignored.", pkg);
             resolving.remove(packageName);

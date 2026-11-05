@@ -2,6 +2,49 @@ package fr.thegamerfarmer.jype.plugin;
 
 /** Invalid declarations must produce diagnostics rather than usable partial systems. */
 public class JypeDeclarationValidationTest extends JypeJavaFixture {
+    public void testExplicitOverridesRequireNonEmptyInheritanceBeforeValidatingDefinitions() {
+        String[] bodies = {
+                "overrides={}", "inherit=\"\", overrides={}", "value={}, overrides={}",
+                "overrides=@fr.thegamerfarmer.jype.annotations.TypeDef(name=\"Item\", bound=Object.class)",
+                "overrides=@fr.thegamerfarmer.jype.annotations.TypeDef(name=\"\", bound=Absent.class)"
+        };
+        for (int i = 0; i < bodies.length; i++) {
+            String pkg = "orphan" + i;
+            define(pkg, bodies[i]);
+            var result = JypeTypeSystemReader.findTypeSystem(getProject(), pkg, scope());
+            assertNotNull(result);
+            assertEquals(JypeTypeSystemResolver.MISSING_INHERIT, result.error());
+            assertEmpty(result.typeDefs());
+        }
+        define("standalone", "");
+        assertNull(JypeTypeSystemReader.findTypeSystem(getProject(), "standalone", scope()).error());
+    }
+
+    public void testTransitiveOverridesAndExplicitEmptyOverrides() {
+        objectSystem("base", "Item");
+        define("middle", "inherit=\"base\"");
+        define("child", """
+                inherit="middle",
+                overrides=@fr.thegamerfarmer.jype.annotations.TypeDef(name="Item", bound=String.class)
+                """);
+        var child = JypeTypeSystemReader.findTypeSystem(getProject(), "child", scope());
+        assertNotNull(child);
+        assertNull(child.error());
+        assertEquals("java.lang.String", child.typeDefs().get(0).boundFqn());
+        define("empty", "inherit=\"middle\", overrides={}");
+        var empty = JypeTypeSystemReader.findTypeSystem(getProject(), "empty", scope());
+        assertNotNull(empty);
+        assertNull(empty.error());
+        assertEquals("Item", empty.typeDefs().get(0).name());
+        define("unknown", """
+                inherit="middle",
+                overrides=@fr.thegamerfarmer.jype.annotations.TypeDef(name="Other", bound=Object.class)
+                """);
+        var unknown = JypeTypeSystemReader.findTypeSystem(getProject(), "unknown", scope());
+        assertNotNull(unknown);
+        assertEquals("Unknown @TypeSystem override: Other", unknown.error());
+    }
+
     public void testMissingAndUnresolvedBoundsAreRejected() {
         assertInvalid("missing",
                 "{@fr.thegamerfarmer.jype.annotations.TypeDef(name=\"Item\")}");

@@ -66,6 +66,14 @@ Jype `TypeDef.name` strings used to create definitions do not offer existing
 names or Java word-completion suggestions. Override suggestions exclude only
 other overrides, not the name currently being edited.
 
+An explicitly declared `overrides` attribute requires a non-empty `inherit`,
+even for `overrides = {}`. An override name must exist in the inherited system,
+including its transitive parents. These violations are errors in both the IDE
+and compilation with the Jype engine. On missing inheritance, **Alt+Enter >
+Add inherit to @TypeSystem** inserts `inherit = ""` (or replaces an empty
+value), places the caret inside the string, and opens package completion.
+The quick fix preserves existing definitions and supports undo.
+
 ## Java analysis
 
 Member completion relies on PSI inheritance from the bound, including members

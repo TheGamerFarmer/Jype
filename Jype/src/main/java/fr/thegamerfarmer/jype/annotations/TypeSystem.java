@@ -68,8 +68,9 @@ public @interface TypeSystem {
 
     /**
      * Types to override relative to the inherited type system.
-     * Each name must already exist in the parent system; requires a non-empty
-     * {@link #inherit()} value.
+     * Each name must already exist in the effective parent system, including
+     * its transitive parents. Explicitly declaring this attribute requires a
+     * non-empty {@link #inherit()} value, even for an empty array.
      *
      * @return ordered overrides with no duplicate names
      */

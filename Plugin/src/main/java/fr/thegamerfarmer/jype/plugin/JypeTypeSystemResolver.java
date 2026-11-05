@@ -22,6 +22,7 @@ import static fr.thegamerfarmer.jype.plugin.JypeTypeSystemReader.*;
  * Invalid declarations produce diagnostics instead of partial type definitions.
  */
 final class JypeTypeSystemResolver {
+    static final String MISSING_INHERIT = "Overrides require non-empty inherit";
     private static final ThreadLocal<Set<PsiAnnotation>> RESOLVING = ThreadLocal.withInitial(HashSet::new);
     private final List<PsiAnnotation> annotations;
     private final GlobalSearchScope scope;
@@ -57,6 +58,10 @@ final class JypeTypeSystemResolver {
     private Result resolveAttributes(PsiAnnotation annotation, String pkg) {
         Map<String, TypeDefInfo> definitions = new LinkedHashMap<>();
         String parent = stringValue(annotation.findDeclaredAttributeValue("inherit"));
+        if (annotation.findDeclaredAttributeValue("overrides") != null
+                && (parent == null || parent.isEmpty())) {
+            return invalid(pkg, annotation, MISSING_INHERIT);
+        }
         Definitions values = readDefinitions(annotation.findDeclaredAttributeValue("value"));
         Definitions overrides = readDefinitions(annotation.findDeclaredAttributeValue("overrides"));
         if (values.error() != null) return invalid(pkg, annotation, values.error());
@@ -74,7 +79,6 @@ final class JypeTypeSystemResolver {
                 definitions.put(override.name(), override);
             }
         } else {
-            if (!overrides.values().isEmpty()) return invalid(pkg, annotation, "Overrides require inherit");
             for (TypeDefInfo def : values.values()) definitions.put(def.name(), def);
         }
         return new Result(pkg, List.copyOf(definitions.values()), annotation, null);

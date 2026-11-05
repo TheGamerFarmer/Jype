@@ -8,10 +8,10 @@ import java.util.List;
 /** Resolves inheritance only from valid, unique declarations inside the supplied visibility boundary. */
 public class JypeTypeSystemResolverTest extends JypeJavaFixture {
     public void testInvalidOverrideSyntaxAndIncompatibleAttributesDoNotPublishPartialDefinitions() {
-        assertError("badOverride", "overrides={42}", "Expected a Jype @TypeDef");
+        assertError("badOverride", "inherit=\"parent\", overrides={42}", "Expected a Jype @TypeDef");
         assertError("noParent", """
                 overrides=@fr.thegamerfarmer.jype.annotations.TypeDef(name="Item", bound=Object.class)
-                """, "Overrides require inherit");
+                """, JypeTypeSystemResolver.MISSING_INHERIT);
         assertError("combined", """
                 value=@fr.thegamerfarmer.jype.annotations.TypeDef(name="Item", bound=Object.class),
                 inherit="parent"

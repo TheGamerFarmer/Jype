@@ -203,7 +203,67 @@ class JypeReliabilityTest {
                 system("managed", "TYPE").replace("TypeSystem({", "TypeSystem(overrides = {"),
                 "managed/Holder.java", "package managed; public class Holder {}"));
         overridesWithoutParent.assertFailure();
-        assertTrue(overridesWithoutParent.hasError("must use either value"));
+        assertTrue(overridesWithoutParent.hasError("overrides require non-empty inherit"));
+    }
+
+    @Test
+    void explicitEmptyOverridesRequireInheritance() throws IOException {
+        for (String attributes : new String[]{
+                "overrides={}", "inherit=\"\", overrides={}",
+                "value={}, overrides={}", "inherit=\"\", overrides={"
+                + "@fr.thegamerfarmer.jype.annotations.TypeDef(name=\"TYPE\", bound=Object.class)}"}) {
+            var result = JypeTestCompiler.compilePermissive(Map.of(
+                    "managed/package-info.java",
+                    "@fr.thegamerfarmer.jype.annotations.TypeSystem(" + attributes + ") package managed;",
+                    "managed/Holder.java", "package managed; public class Holder {}"));
+            result.assertFailure();
+            assertTrue(result.hasError("overrides require non-empty inherit"), result.diagnostics().toString());
+        }
+        JypeTestCompiler.compile(Map.of(
+                "managed/package-info.java", "@fr.thegamerfarmer.jype.annotations.TypeSystem() package managed;",
+                "managed/Holder.java", "package managed; public class Holder {}")).assertSuccess();
+    }
+
+    @Test
+    void overridesValidateAgainstTransitiveInheritedNames() throws IOException {
+        for (String parent : new String[]{"base", "derived"}) {
+            for (String name : new String[]{"TYPE", "ABSENT"}) {
+                var result = JypeTestCompiler.compilePermissive(Map.of(
+                        "base/package-info.java", system("base", "TYPE"),
+                        "derived/package-info.java",
+                        "@fr.thegamerfarmer.jype.annotations.TypeSystem(inherit=\"base\") package derived;",
+                        "managed/package-info.java",
+                        "@fr.thegamerfarmer.jype.annotations.TypeSystem(inherit=\"" + parent + "\", overrides={"
+                        + "@fr.thegamerfarmer.jype.annotations.TypeDef(name=\"" + name
+                        + "\", bound=String.class)}) package managed;",
+                        "managed/Holder.java", "package managed; public class Holder {}"));
+                if (name.equals("TYPE")) {
+                    result.assertSuccess();
+                } else {
+                    result.assertFailure();
+                    assertTrue(result.hasError("does not exist in the inherited @TypeSystem"),
+                            result.diagnostics().toString());
+                }
+            }
+        }
+        JypeTestCompiler.compile(Map.of(
+                "base/package-info.java", system("base", "TYPE"),
+                "managed/package-info.java",
+                "@fr.thegamerfarmer.jype.annotations.TypeSystem(inherit=\"base\", overrides={}) package managed;",
+                "managed/Holder.java", "package managed; public class Holder {}")).assertSuccess();
+    }
+
+    @Test
+    void compiledExplicitEmptyOverridesRequireInheritance() throws IOException {
+        var result = JypeTestCompiler.compileTwoPass(Map.of(
+                "library/package-info.java",
+                "@fr.thegamerfarmer.jype.annotations.TypeSystem(overrides={}) package library;",
+                "library/Anchor.java", "package library; public class Anchor {}"), Map.of(
+                "managed/package-info.java",
+                "@fr.thegamerfarmer.jype.annotations.TypeSystem(inherit=\"library\") package managed;",
+                "managed/Holder.java", "package managed; public class Holder {}"));
+        result.assertFailure();
+        assertTrue(result.hasError("overrides require non-empty inherit"), result.diagnostics().toString());
     }
 
     @Test

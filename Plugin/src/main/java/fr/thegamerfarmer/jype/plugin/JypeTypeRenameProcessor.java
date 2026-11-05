@@ -54,7 +54,8 @@ public final class JypeTypeRenameProcessor extends RenamePsiElementProcessor {
         PsiClass type = (PsiClass) element;
         PsiAnnotationMemberValue origin = JypeTypeSystemReader.renameOrigin(type);
         if (origin == null) return List.of();
-        Set<PsiReference> references = new LinkedHashSet<>();
+        // IntelliJ processes word matches from different files concurrently.
+        Set<PsiReference> references = Collections.synchronizedSet(new LinkedHashSet<>());
         PsiSearchHelper.getInstance(element.getProject()).processElementsWithWord((candidate, offset) -> {
             ProgressManager.checkCanceled();
             PsiReference reference = candidate.getContainingFile()
@@ -64,7 +65,7 @@ public final class JypeTypeRenameProcessor extends RenamePsiElementProcessor {
                     && origin.equals(JypeTypeSystemReader.renameOrigin(resolved))) references.add(reference);
             return true;
         }, scope, Objects.requireNonNull(type.getName()), (short) (UsageSearchContext.IN_CODE | UsageSearchContext.IN_STRINGS), true);
-        return references;
+        return List.copyOf(references);
     }
 
     /**

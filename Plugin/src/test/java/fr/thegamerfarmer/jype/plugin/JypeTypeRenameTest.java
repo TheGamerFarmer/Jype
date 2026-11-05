@@ -6,6 +6,28 @@ import java.util.Arrays;
 
 /** Source rename origins, inherited families, conflicts and undo behavior. */
 public class JypeTypeRenameTest extends JypeJavaFixture {
+    public void testRenameSearchRetainsReferencesAcrossManyFiles() {
+        objectSystem("managed", "TYPE");
+        var files = new java.util.ArrayList<PsiFile>();
+        for (int i = 0; i < 64; i++) {
+            files.add(myFixture.addFileToProject("managed/Consumer" + i + ".java",
+                    "package managed; class Consumer" + i + " { TYPE value; java.util.List<managed.TYPE> values; }"));
+        }
+        PsiClass type = new JypePsiElementFinder(getProject()).findClass("managed.TYPE", scope());
+        assertNotNull(type);
+        var processor = new JypeTypeRenameProcessor();
+        for (int i = 0; i < 20; i++) {
+            var references = processor.findReferences(type, scope(), false);
+            assertEquals("Search " + i + " must retain both usages in each file and the declaration",
+                    129, references.size());
+        }
+        new com.intellij.refactoring.rename.RenameProcessor(getProject(), type, "PLAYER", false, false).run();
+        for (PsiFile file : files) {
+            assertTrue(file.getText(), file.getText().contains("PLAYER value;"));
+            assertTrue(file.getText(), file.getText().contains("java.util.List<managed.PLAYER>"));
+        }
+    }
+
     public void testRenameFromCodeUpdatesDeclarationAndOnlyRelatedUsages() {
         PsiFile definition = define("managed",
                 "{@fr.thegamerfarmer.jype.annotations.TypeDef(name=\"TYPE\", bound=Object.class)}");

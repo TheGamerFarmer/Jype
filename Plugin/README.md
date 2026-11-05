@@ -115,8 +115,8 @@ daemon under Java 25.
 .\gradlew.bat check buildPlugin verifyPlugin
 ```
 
-The development artifact is `build\distributions\JypePlugin-1.0-SNAPSHOT.zip`.
-The public distribution procedure has not yet been defined.
+The built artifact is `build\distributions\JypePlugin-1.0.0.zip`.
+For public distribution, see [Installation](#installation).
 
 To verify binary compatibility with a local installation:
 

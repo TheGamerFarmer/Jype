@@ -3,6 +3,17 @@
 This plugin complements the Jype javac engine; it does not replace it or modify
 Java sources for compilation.
 
+## Installation
+
+Publishing a GitHub Release automatically builds and verifies the plugin from
+its tag, then attaches the plugin ZIP to that release's assets. Download that
+ZIP and install it through **Settings > Plugins > Install Plugin from Disk**
+in IntelliJ IDEA. The attachment appears after the plugin workflow finishes
+successfully; rerunning the workflow replaces the matching asset.
+
+Push and pull-request builds also provide the ZIP in the
+`jype-intellij-plugin` artifact in GitHub Actions.
+
 ## Resolution and diagnostics
 
 Virtual names come exclusively from the

@@ -5,6 +5,16 @@ import com.intellij.testFramework.DumbModeTestUtils;
 
 /** Project-view presentation isolated to source type-system declarations. */
 public class JypePackageInfoDecoratorTest extends JypeJavaFixture {
+    public void testTabPresentationFromBackgroundThreadWithoutReadAction() throws Exception {
+        var file = define("managed", "{}").getVirtualFile();
+        var tabs = new JypePackageInfoPresentation();
+        com.intellij.openapi.application.ApplicationManager.getApplication().executeOnPooledThread(() -> {
+            assertFalse(com.intellij.openapi.application.ApplicationManager.getApplication().isReadAccessAllowed());
+            assertEquals("package-info", tabs.getEditorTabTitle(getProject(), file));
+            assertSame(JypePackageInfoDecorator.ICON, tabs.getIcon(file, 0, getProject()));
+        }).get(15, java.util.concurrent.TimeUnit.SECONDS);
+    }
+
     public void testJypePackageInfoPresentationDoesNotChangeOrdinaryFiles() {
         PsiFile jype = define("managed", "{}");
         PsiFile plain = myFixture.addFileToProject("plain/package-info.java", "package plain;");

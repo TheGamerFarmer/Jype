@@ -119,4 +119,73 @@ public class JypeAnnotationCompletionTest extends JypeJavaFixture {
                 """);
         assertFalse(names.toString(), names.contains("PLAYER"));
     }
+
+    public void testImportedAnnotationsAndQualifiedPackagePrefix() {
+        objectSystem("fr.example.api", "PLAYER");
+        objectSystem("fr.example.other", "ROLE");
+        myFixture.addFileToProject("fr/example/ordinary/Ordinary.java",
+                "package fr.example.ordinary; class Ordinary {}");
+        var file = myFixture.addFileToProject("consumer/package-info.java", """
+                @TypeSystem(inherit="fr.example.<caret>")
+                package consumer;
+                import fr.thegamerfarmer.jype.annotations.TypeSystem;
+                """);
+        myFixture.configureFromExistingVirtualFile(file.getVirtualFile());
+        var variants = myFixture.complete(CompletionType.BASIC);
+        assertNotNull(variants);
+        assertSameElements(Arrays.stream(variants).map(LookupElement::getLookupString).toList(),
+                "fr.example.api", "fr.example.other");
+    }
+
+    public void testImportedOverrideSuggestsExistingCurrentNameAndUnusedNames() {
+        parent();
+        var file = myFixture.addFileToProject("consumer/package-info.java", """
+                @TypeSystem(inherit="library", overrides={
+                    @TypeDef(name="PLAYER<caret>", bound=Object.class)
+                })
+                package consumer;
+                import fr.thegamerfarmer.jype.annotations.*;
+                """);
+        myFixture.configureFromExistingVirtualFile(file.getVirtualFile());
+        myFixture.complete(CompletionType.BASIC);
+        assertTrue(myFixture.getFile().getText(), myFixture.getFile().getText().contains("name=\"PLAYER\""));
+    }
+
+    public void testImportedOverrideArrayOffersOnlyInheritedNames() {
+        parent();
+        var file = myFixture.addFileToProject("consumer/package-info.java", """
+                @TypeSystem(inherit="library", overrides={
+                    @TypeDef(name="<caret>", bound=Object.class)
+                })
+                package consumer;
+                import fr.thegamerfarmer.jype.annotations.TypeSystem;
+                import fr.thegamerfarmer.jype.annotations.TypeDef;
+                """);
+        myFixture.configureFromExistingVirtualFile(file.getVirtualFile());
+        var variants = myFixture.complete(CompletionType.BASIC);
+        assertNotNull(variants);
+        assertSameElements(Arrays.stream(variants).map(LookupElement::getLookupString).toList(), "PLAYER", "ROLE");
+    }
+
+    public void testStandaloneNameDoesNotOfferWordsAlreadyDeclaredInFile() {
+        parent();
+        var names = complete("""
+                value={
+                    @fr.thegamerfarmer.jype.annotations.TypeDef(name="CREATED_NAME", bound=Object.class),
+                    @fr.thegamerfarmer.jype.annotations.TypeDef(name="<caret>", bound=Object.class)
+                }, inherit="library"
+                """);
+        assertEmpty(names);
+    }
+
+    public void testOverrideDoesNotExcludeNamesInValueArray() {
+        parent();
+        var names = complete("""
+                value={@fr.thegamerfarmer.jype.annotations.TypeDef(name="PLAYER", bound=Object.class)},
+                inherit="library", overrides={
+                    @fr.thegamerfarmer.jype.annotations.TypeDef(name="<caret>", bound=Object.class)
+                }
+                """);
+        assertContainsElements(names, "PLAYER", "ROLE");
+    }
 }

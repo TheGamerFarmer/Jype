@@ -61,7 +61,10 @@ It excludes the current package and choices that would introduce an inheritance
 cycle. Inside an override's `@TypeDef(name = "...")`, it suggests names from the
 inherited system, excluding names already overridden in that declaration.
 These suggestions respect the file's module scope and wait for indexing;
-ordinary strings and standalone type definitions keep normal Java completion.
+unrelated strings keep normal Java completion.
+Jype `TypeDef.name` strings used to create definitions do not offer existing
+names or Java word-completion suggestions. Override suggestions exclude only
+other overrides, not the name currently being edited.
 
 ## Java analysis
 
@@ -126,12 +129,17 @@ compatibility with the 2024.1 SDK.
 machine-specific absolute path. If no JDK 21 is detected, set `JAVA_HOME` to
 its installation before launching the wrapper. Gradle 8.11.1 must not run its
 daemon under Java 25.
+If Java 21 is installed outside Gradle's discovery locations, pass
+`"-Dorg.gradle.java.installations.paths=C:\path\to\jdk-21"` to the wrapper.
+The same option can be added to **Run Plugin > Gradle arguments** in the IDE.
+This selects an existing installation without changing the shared Java 21
+requirement or embedding a machine-specific path in the project.
 
 ```powershell
 .\gradlew.bat check buildPlugin verifyPlugin
 ```
 
-The built artifact is `build\distributions\JypePlugin-1.0.0.zip`.
+The built artifact is `build\distributions\JypePlugin-1.0.1.zip`.
 For public distribution, see [Installation](#installation).
 
 To verify binary compatibility with a local installation:

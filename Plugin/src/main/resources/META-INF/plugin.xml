@@ -1,7 +1,7 @@
 <idea-plugin>
   <id>fr.thegamerfarmer.jype.plugin</id>
   <name>Jype</name>
-  <version>1.0.0</version>
+  <version>1.0.1</version>
   <vendor>TheGamerFarmer</vendor>
 
   <description><![CDATA[

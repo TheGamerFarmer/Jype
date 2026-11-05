@@ -33,6 +33,7 @@ public final class JypeAnnotationCompletionContributor extends CompletionContrib
             system = annotation;
         } else {
             if (!"name".equals(pair.getName()) || !hasAnnotationName(annotation, DEF)) return;
+            result.stopHere();
             system = PsiTreeUtil.getParentOfType(annotation, PsiAnnotation.class);
             if (system == null || !hasAnnotationName(system, SYSTEM)) return;
             PsiAnnotationMemberValue overrides = system.findDeclaredAttributeValue("overrides");
@@ -41,35 +42,41 @@ public final class JypeAnnotationCompletionContributor extends CompletionContrib
         PsiLiteralExpression original = PsiTreeUtil.getParentOfType(
                 file.findElementAt(parameters.getOffset() - 1), PsiLiteralExpression.class, false);
         if (original == null) return;
+        PsiAnnotation originalAnnotation = PsiTreeUtil.getParentOfType(original, PsiAnnotation.class);
+        if (originalAnnotation == null) return;
+        system = inherit ? originalAnnotation
+                : PsiTreeUtil.getParentOfType(originalAnnotation, PsiAnnotation.class);
+        if (system == null) return;
         int offset = parameters.getOffset() - original.getTextRange().getStartOffset();
         if (offset < 1 || !original.getText().startsWith("\"")) return;
+        if (offset > original.getTextLength()) return;
         String prefix = original.getText().substring(1, offset);
-        int suffixLength = Math.max(0, original.getTextLength() - offset
-                - (original.getText().endsWith("\"") ? 1 : 0));
         CompletionResultSet strings = result.withPrefixMatcher(prefix);
         List<JypeTypeSystemReader.Result> systems =
                 JypeTypeSystemReader.getTypeSystems(file.getProject(), file.getResolveScope());
         if (inherit) {
             for (var candidate : systems) {
                 if (candidate.error() != null || wouldCycle(candidate, file.getPackageName(), systems)) continue;
-                add(strings, candidate.pkg(), suffixLength);
+                add(strings, candidate.pkg());
             }
         } else {
             String parent = stringValue(system.findDeclaredAttributeValue("inherit"));
             Set<String> used = new HashSet<>();
+            PsiAnnotationMemberValue overrides = system.findDeclaredAttributeValue("overrides");
             for (PsiAnnotation sibling : PsiTreeUtil.findChildrenOfType(system, PsiAnnotation.class)) {
-                if (sibling == annotation || !hasAnnotationName(sibling, DEF)) continue;
+                if (sibling == originalAnnotation || !hasAnnotationName(sibling, DEF)
+                        || overrides == null || !PsiTreeUtil.isAncestor(overrides, sibling, false)) continue;
                 String name = stringValue(sibling.findDeclaredAttributeValue("name"));
                 if (name != null) used.add(name);
             }
             for (var candidate : systems) {
                 if (!candidate.pkg().equals(parent) || candidate.error() != null) continue;
                 for (var definition : candidate.typeDefs()) {
-                    if (!used.contains(definition.name())) add(strings, definition.name(), suffixLength);
+                    if (!used.contains(definition.name())) add(strings, definition.name());
                 }
             }
-            result.stopHere();
         }
+        result.stopHere();
     }
 
     private boolean wouldCycle(JypeTypeSystemReader.Result candidate, String pkg,
@@ -85,13 +92,19 @@ public final class JypeAnnotationCompletionContributor extends CompletionContrib
         return true;
     }
 
-    private void add(CompletionResultSet result, String value, int suffixLength) {
+    private void add(CompletionResultSet result, String value) {
         result.addElement(LookupElementBuilder.create(value)
                 .withIcon(JypePackageInfoDecorator.ICON)
                 .withInsertHandler((context, item) -> {
-                    if (suffixLength > 0) {
-                        context.getDocument().deleteString(context.getTailOffset(),
-                                context.getTailOffset() + suffixLength);
+                    context.commitDocument();
+                    PsiLiteralExpression inserted = PsiTreeUtil.getParentOfType(
+                            context.getFile().findElementAt(context.getTailOffset() - 1),
+                            PsiLiteralExpression.class, false);
+                    if (inserted == null || !inserted.getText().startsWith("\"")) return;
+                    int end = inserted.getTextRange().getEndOffset()
+                            - (inserted.getText().endsWith("\"") ? 1 : 0);
+                    if (end > context.getTailOffset()) {
+                        context.getDocument().deleteString(context.getTailOffset(), end);
                     }
                 }));
     }

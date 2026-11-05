@@ -31,6 +31,10 @@ branch's root directory. Subsequent tags publish automatically. Add the
 repository and dependency below:
 
 ```xml
+<properties>
+    <jype.version>1.0.0</jype.version>
+</properties>
+
 <repositories>
     <repository>
         <id>jype-github-pages</id>
@@ -42,12 +46,12 @@ repository and dependency below:
     <dependency>
         <groupId>fr.thegamerfarmer.jype</groupId>
         <artifactId>Jype</artifactId>
-        <version>1.0.0</version>
+        <version>${jype.version}</version>
     </dependency>
 </dependencies>
 ```
 
-Replace `1.0.0` with the desired release version (tag `v1.0.0`). The published
+Set `jype.version` to the desired release version (tag `v1.0.0`). The published
 engine is built with Java 21; Maven and its compiler must run on JDK 21 or
 newer (the engine is tested on JDK 21 and 25).
 
@@ -78,7 +82,7 @@ dependency and processor path:
             <path>
                 <groupId>fr.thegamerfarmer.jype</groupId>
                 <artifactId>Jype</artifactId>
-                <version>1.0.0</version>
+                <version>${jype.version}</version>
             </path>
         </annotationProcessorPaths>
     </configuration>
@@ -145,6 +149,34 @@ Its absence is therefore not proof that the build is correctly configured.
 
 See the [engine guide](Jype/README.md#compiler-execution-and-processor-coexistence)
 for processor coexistence and the language contracts.
+
+### Updating and checking the engine version
+
+Publish each changed engine under a new version tag, for example `v1.0.1`,
+pointing at the commit containing the fix, and wait for the Maven publishing
+workflow to succeed. Pushing `master` or publishing a plugin ZIP does not update
+the Maven engine. Do not replace an existing stable version with different
+bytes: consumers and repository caches can retain the old artifact.
+
+Change the consumer's `jype.version` property once so both the compile dependency
+and annotation processor path select the new version. Reload the Maven project
+in IntelliJ, then run `mvn -U clean compile`. `-U` does not guarantee replacement
+of an already cached stable release with the same coordinates.
+
+Use `mvn help:evaluate -Dexpression=jype.version -q -DforceStdout` to check the
+property, `mvn dependency:tree -Dincludes=fr.thegamerfarmer.jype:Jype` to check
+the compile dependency, and `mvn help:effective-pom` to check the processor path
+after parent POMs and profiles are applied. When using a custom local repository,
+`mvn help:evaluate -Dexpression=settings.localRepository -q -DforceStdout`
+shows its location. For exact artifact verification, compare the SHA-256 of
+that repository's `fr\thegamerfarmer\jype\Jype\<version>\Jype-<version>.jar`
+with the JAR downloaded from
+`https://thegamerfarmer.github.io/Jype/maven/fr/thegamerfarmer/jype/Jype/<version>/Jype-<version>.jar`
+using PowerShell `Get-FileHash -Algorithm SHA256`.
+
+The IntelliJ plugin has its own version and installation. An engine dependency
+update does not update that plugin; check **Settings > Plugins > Jype** and
+install the matching updated ZIP or Marketplace release, then restart the IDE.
 
 ## Declaring a type family
 

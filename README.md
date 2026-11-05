@@ -28,14 +28,13 @@ Stable engine releases are published to a public Maven repository on GitHub
 Pages when a `v*` version tag is pushed. Push the first version tag to create
 the `gh-pages` branch, then configure **Settings → Pages** to publish from that
 branch's root directory. Subsequent tags publish automatically. Add the
-repository and dependency below, replacing `OWNER` and `REPOSITORY` with the
-GitHub account and repository name:
+repository and dependency below:
 
 ```xml
 <repositories>
     <repository>
         <id>jype-github-pages</id>
-        <url>https://OWNER.github.io/REPOSITORY/maven/</url>
+        <url>https://thegamerfarmer.github.io/Jype/maven/</url>
     </repository>
 </repositories>
 

@@ -9,6 +9,11 @@ program.
 This guide describes using the engine in an already configured compilation.
 Editor integration is documented in the IntelliJ module README.
 
+For a complete Maven consumer setup (repository, dependency, compiler plugin,
+processor path/list and compiler JVM options), follow
+[Maven installation](../README.md#using-the-engine-from-maven). Adding the
+dependency or installing the IDE plugin alone does not activate compilation.
+
 ## Defining a type system
 
 ```java

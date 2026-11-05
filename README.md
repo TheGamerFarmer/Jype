@@ -48,8 +48,102 @@ repository and dependency below:
 ```
 
 Replace `1.0.0` with the desired release version (tag `v1.0.0`). The published
-engine is built with Java 21; consumers need JDK 21 or newer. The compiler
-integration requirements are described in the [engine guide](Jype/README.md).
+engine is built with Java 21; Maven and its compiler must run on JDK 21 or
+newer (the engine is tested on JDK 21 and 25).
+
+**The dependency alone does not enable Jype.** Installing the IntelliJ plugin
+does not enable it in Maven either. Every module compiling Jype sources,
+including a consumer of a separately compiled Jype library, needs the
+dependency on its compile classpath, the javac plugin, and the annotation
+processor. A raw or partial superclass such as `APISubPower<MASTER_POWER>`
+relies on these transformations to supply the managed type arguments.
+
+### Activate the compiler
+
+Add this plugin inside your POM's `<build><plugins>`, or merge the configuration
+into your existing `maven-compiler-plugin`. Use the same Jype version in the
+dependency and processor path:
+
+```xml
+<plugin>
+    <groupId>org.apache.maven.plugins</groupId>
+    <artifactId>maven-compiler-plugin</artifactId>
+    <version>3.13.0</version>
+    <configuration>
+        <proc>full</proc>
+        <compilerArgs>
+            <arg>-Xplugin:Jype</arg>
+        </compilerArgs>
+        <annotationProcessorPaths>
+            <path>
+                <groupId>fr.thegamerfarmer.jype</groupId>
+                <artifactId>Jype</artifactId>
+                <version>1.0.0</version>
+            </path>
+        </annotationProcessorPaths>
+        <annotationProcessors>
+            <annotationProcessor>fr.thegamerfarmer.jype.JypeProcessorShim</annotationProcessor>
+        </annotationProcessors>
+    </configuration>
+</plugin>
+```
+
+This example runs javac inside Maven (the default, `fork=false`). Create
+`.mvn/jvm.config` at the Maven invocation root with:
+
+```text
+--add-exports=jdk.compiler/com.sun.tools.javac.api=ALL-UNNAMED
+--add-exports=jdk.compiler/com.sun.tools.javac.code=ALL-UNNAMED
+--add-exports=jdk.compiler/com.sun.tools.javac.model=ALL-UNNAMED
+--add-exports=jdk.compiler/com.sun.tools.javac.processing=ALL-UNNAMED
+--add-exports=jdk.compiler/com.sun.tools.javac.tree=ALL-UNNAMED
+--add-exports=jdk.compiler/com.sun.tools.javac.util=ALL-UNNAMED
+--add-opens=jdk.compiler/com.sun.tools.javac.code=ALL-UNNAMED
+```
+
+These options belong to the **JVM running the compiler**, not the application
+or the source language level. With `<fork>true</fork>`, pass each option to
+the forked javac as a `<compilerArgs><arg>-J--add-exports=...</arg>` or
+`<arg>-J--add-opens=...</arg>` instead. With toolchains or an explicit compiler
+executable, check that the selected compiler also uses JDK 21 or newer.
+Jype can attempt automatic module opening when options are absent, but
+explicit options avoid relying on Unsafe and restrictive JVM policies.
+
+### Other processors, scopes and verification
+
+If using Lombok or another processor, **retain it in both explicit lists**:
+add its dependency to `annotationProcessorPaths` and its processor class to
+`annotationProcessors`. For Lombok, that class is
+`lombok.launch.AnnotationProcessorHider$AnnotationProcessor`; select a Lombok
+version compatible with the compiler JDK. Replacing the processor path/list
+with Jype alone disables discovery of other processors. `-proc:none` disables
+the Jype processor and must not be used for a Jype consumer build.
+
+The dependency may use `<scope>provided</scope>` when the engine is only a
+compile-time tool. Both `provided` and the default `compile` scope expose its
+annotations during compilation; a processor path alone does not. A `provided`
+dependency in the API library does not propagate to consumers: each consumer
+must declare Jype itself. The intended application runtime and any other
+dependencies still determine the appropriate output bytecode target; changing
+that target does not change which JDK runs Maven.
+
+Run `mvn -version` to check Maven's JDK, then `mvn clean compile`. In IntelliJ,
+check the Maven runner JDK and reload the Maven project. If configuration is
+inherited or profile-dependent, inspect `mvn help:effective-pom` to confirm
+the effective compiler arguments, processor path and processor list.
+
+The IntelliJ plugin displays a **Jype warning banner** in Java files governed
+by a visible type system when the nearest local POM lacks the direct Jype
+dependency, `-Xplugin:Jype`, or the Jype processor path. **Configure** inserts
+those entries; it does not validate the effective POM, resolve dependencies,
+configure the Maven JDK or module-opening options, or check an explicit
+processor list / `proc` mode. It also does not add the Maven repository.
+The banner is deferred during indexing, absent without a detected type system
+or POM, and can be dismissed with **Ignore** for that file during the session.
+Its absence is therefore not proof that the build is correctly configured.
+
+See the [engine guide](Jype/README.md#compiler-execution-and-processor-coexistence)
+for processor coexistence and the language contracts.
 
 ## Declaring a type family
 

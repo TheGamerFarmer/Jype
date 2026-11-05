@@ -139,7 +139,7 @@ requirement or embedding a machine-specific path in the project.
 .\gradlew.bat check buildPlugin verifyPlugin
 ```
 
-The built artifact is `build\distributions\JypePlugin-1.0.1.zip`.
+The built artifact is `build\distributions\JypePlugin-1.0.0.zip`.
 For public distribution, see [Installation](#installation).
 
 To verify binary compatibility with a local installation:

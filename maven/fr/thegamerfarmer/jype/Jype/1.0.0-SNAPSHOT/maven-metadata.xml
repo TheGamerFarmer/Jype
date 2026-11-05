@@ -3,21 +3,21 @@
   <groupId>fr.thegamerfarmer.jype</groupId>
   <artifactId>Jype</artifactId>
   <versioning>
-    <lastUpdated>20261105215349</lastUpdated>
+    <lastUpdated>20261105222513</lastUpdated>
     <snapshot>
-      <timestamp>20261105.215349</timestamp>
-      <buildNumber>2</buildNumber>
+      <timestamp>20261105.222513</timestamp>
+      <buildNumber>3</buildNumber>
     </snapshot>
     <snapshotVersions>
       <snapshotVersion>
         <extension>jar</extension>
-        <value>1.0.0-20261105.215349-2</value>
-        <updated>20261105215349</updated>
+        <value>1.0.0-20261105.222513-3</value>
+        <updated>20261105222513</updated>
       </snapshotVersion>
       <snapshotVersion>
         <extension>pom</extension>
-        <value>1.0.0-20261105.215349-2</value>
-        <updated>20261105215349</updated>
+        <value>1.0.0-20261105.222513-3</value>
+        <updated>20261105222513</updated>
       </snapshotVersion>
     </snapshotVersions>
   </versioning>

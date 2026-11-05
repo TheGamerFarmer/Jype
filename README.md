@@ -27,7 +27,11 @@ result, the javac build with Jype is the reference.
 Stable engine releases are published to a public Maven repository on GitHub
 Pages when a `v*` version tag is pushed. Push the first version tag to create
 the `gh-pages` branch, then configure **Settings → Pages** to publish from that
-branch's root directory. Subsequent tags publish automatically. Add the
+branch's root directory. Subsequent tags publish automatically.
+Every push to `master` also publishes the current development engine as
+`1.0.0-SNAPSHOT`, without requiring a tag or GitHub Release. The repository
+retains previous versions and metadata; existing stable versions are never
+overwritten. Add the
 repository and dependency below:
 
 ```xml
@@ -39,6 +43,10 @@ repository and dependency below:
     <repository>
         <id>jype-github-pages</id>
         <url>https://thegamerfarmer.github.io/Jype/maven/</url>
+        <snapshots>
+            <enabled>true</enabled>
+            <updatePolicy>always</updatePolicy>
+        </snapshots>
     </repository>
 </repositories>
 
@@ -54,6 +62,9 @@ repository and dependency below:
 Set `jype.version` to the desired release version (tag `v1.0.0`). The published
 engine is built with Java 21; Maven and its compiler must run on JDK 21 or
 newer (the engine is tested on JDK 21 and 25).
+To receive development fixes, set `jype.version` to `1.0.0-SNAPSHOT` instead.
+The repository configuration above enables snapshot downloads and checks for
+updates on each Maven invocation.
 
 **The dependency alone does not enable Jype.** Installing the IntelliJ plugin
 does not enable it in Maven either. Every module compiling Jype sources,
@@ -152,10 +163,17 @@ for processor coexistence and the language contracts.
 
 ### Updating and checking the engine version
 
+For development, keep `jype.version` at `1.0.0-SNAPSHOT` in the consumer.
+Push the engine fix to `master` and wait for **Publish Maven repository** to
+succeed, then reload Maven in IntelliJ and run `mvn -U clean compile`.
+Maven resolves timestamped snapshot revisions through repository metadata;
+neither a new tag nor a POM change is needed for each fix. This does not
+automatically install updates of the IntelliJ plugin.
+
 Publish each changed engine under a new version tag, for example `v1.0.1`,
 pointing at the commit containing the fix, and wait for the Maven publishing
-workflow to succeed. Pushing `master` or publishing a plugin ZIP does not update
-the Maven engine. Do not replace an existing stable version with different
+workflow to succeed. Pushing `master` updates only the snapshot; publishing a
+plugin ZIP does not update the Maven engine. Do not replace an existing stable version with different
 bytes: consumers and repository caches can retain the old artifact.
 
 Change the consumer's `jype.version` property once so both the compile dependency
@@ -170,9 +188,12 @@ after parent POMs and profiles are applied. When using a custom local repository
 `mvn help:evaluate -Dexpression=settings.localRepository -q -DforceStdout`
 shows its location. For exact artifact verification, compare the SHA-256 of
 that repository's `fr\thegamerfarmer\jype\Jype\<version>\Jype-<version>.jar`
-with the JAR downloaded from
+with the stable JAR downloaded from
 `https://thegamerfarmer.github.io/Jype/maven/fr/thegamerfarmer/jype/Jype/<version>/Jype-<version>.jar`
 using PowerShell `Get-FileHash -Algorithm SHA256`.
+For a snapshot, `maven-metadata.xml` in the `1.0.0-SNAPSHOT` repository directory
+lists the timestamped JAR revision. Compare against that file, not a presumed
+`Jype-1.0.0-SNAPSHOT.jar` URL; the local Maven JAR uses the snapshot base name.
 
 The IntelliJ plugin has its own version and installation. An engine dependency
 update does not update that plugin; check **Settings > Plugins > Jype** and

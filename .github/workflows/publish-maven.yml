@@ -2,6 +2,8 @@ name: Publish Maven repository
 
 on:
   push:
+    branches:
+      - master
     tags:
       - 'v*'
 
@@ -23,15 +25,25 @@ jobs:
           java-version: '21'
           cache: maven
           cache-dependency-path: Jype/pom.xml
-      - name: Validate release tag
+      - name: Select Maven version
         id: release
         shell: bash
         run: |
-          if [[ ! "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "::error::Release tags must look like v1.2.3"
-            exit 1
+          if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
+            if [[ ! "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              echo "::error::Release tags must look like v1.2.3"
+              exit 1
+            fi
+            version="${GITHUB_REF_NAME#v}"
+          else
+            version="$(mvn --batch-mode --no-transfer-progress -q -f Jype/pom.xml \
+              help:evaluate -Dexpression=project.version -DforceStdout)"
+            if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+-SNAPSHOT$ ]]; then
+              echo "::error::The development POM must use a version such as 1.0.0-SNAPSHOT"
+              exit 1
+            fi
           fi
-          echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
       - name: Set Maven version
         env:
           RELEASE_VERSION: ${{ steps.release.outputs.version }}
@@ -39,13 +51,27 @@ jobs:
           mvn --batch-mode --no-transfer-progress -f Jype/pom.xml
           org.codehaus.mojo:versions-maven-plugin:2.18.0:set
           "-DnewVersion=$RELEASE_VERSION" -DgenerateBackupPoms=false
-      - name: Test and package release with Java 21
+      - name: Test and package with Java 21
         run: mvn --batch-mode --no-transfer-progress -f Jype/pom.xml clean verify
-      - name: Add release to the Maven repository
+      - name: Restore existing Maven repository
+        shell: bash
+        run: |
+          mkdir -p site
+          existing="$(git ls-remote --heads origin gh-pages)"
+          if [[ -n "$existing" ]]; then
+            git fetch --depth=1 origin gh-pages
+            git archive FETCH_HEAD | tar -x -C site
+          fi
+      - name: Add version to the Maven repository
         env:
           RELEASE_VERSION: ${{ steps.release.outputs.version }}
         run: |
           mkdir -p site/maven
+          if [[ "$RELEASE_VERSION" != *-SNAPSHOT && \
+                -e "site/maven/fr/thegamerfarmer/jype/Jype/$RELEASE_VERSION" ]]; then
+            echo "::error::Stable version $RELEASE_VERSION already exists; publish a new version instead"
+            exit 1
+          fi
           mvn --batch-mode --no-transfer-progress -f Jype/pom.xml \
             org.apache.maven.plugins:maven-deploy-plugin:3.1.4:deploy-file \
             "-Dfile=$GITHUB_WORKSPACE/Jype/target/Jype-$RELEASE_VERSION.jar" \

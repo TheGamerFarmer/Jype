@@ -274,6 +274,10 @@ sources. The documentary copies hide managed class parameters, technical
 arguments, recursive expansions and static helper implementations. Ordinary
 generics, their bounds, comments and method-level alias shadows are preserved.
 Technical `@param` tags disappear with their parameters.
+Shared ordinary parameters omitted in abbreviated inheritance are restored:
+`Partial<A> extends Generic<String>` is documented as `Generic<A, String>`
+when `Generic` declares `<A, B>`. These are ordinary Java parameters, not
+technical slots to hide.
 
 Documentary alias interfaces, such as `PLAYER`, provide real Javadoc links.
 Metadata-bearing compiled ancestors and referenced managed types receive

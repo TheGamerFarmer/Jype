@@ -2,6 +2,7 @@ package fr.thegamerfarmer.jype;
 
 import com.sun.source.tree.*;
 import com.sun.source.util.SourcePositions;
+import com.sun.source.util.TreePath;
 import com.sun.source.util.TreePathScanner;
 import java.util.*;
 import java.util.function.Predicate;
@@ -146,7 +147,9 @@ final class JavadocPatchCollector extends TreePathScanner<Void, Void> {
             if (arguments.size() == order.size()) {
                 removeManagedList(arguments, order.stream().map(p -> p[1].equals("true")).toList());
             } else if (arguments.size() != nonJypeCount && nonJypeCount != 0) {
-                throw new IllegalStateException("Unexpected public Javadoc type argument count for " + tree);
+                if (!patchSharedInheritanceArguments(tree, paramOrder)) {
+                    throw new IllegalStateException("Unexpected public Javadoc type argument count for " + tree);
+                }
             } else if (nonJypeCount == 0) {
                 removeManagedList(arguments, Collections.nCopies(arguments.size(), true));
             }
@@ -189,6 +192,38 @@ final class JavadocPatchCollector extends TreePathScanner<Void, Void> {
             addInsertion(insertion, consumedUserArgs < arguments.size()
                     ? argument + ", " : ", " + argument);
         }
+    }
+
+    private boolean patchSharedInheritanceArguments(ParameterizedTypeTree tree, List<String[]> parameters) {
+        TreePath parent = getCurrentPath().getParentPath();
+        while (parent != null && parent.getLeaf() instanceof AnnotatedTypeTree) parent = parent.getParentPath();
+        if (parent == null || !(parent.getLeaf() instanceof ClassTree owner)
+                || !containsType(owner.getExtendsClause(), tree)
+                    && owner.getImplementsClause().stream().noneMatch(type -> containsType(type, tree))) return false;
+        long unshared = parameters.stream().filter(parameter -> !scope.typeParameterInScope(parameter[0])).count();
+        if (unshared != tree.getTypeArguments().size()
+                || parameters.stream().anyMatch(parameter ->
+                    parameter[1].equals("true") && !scope.typeParameterInScope(parameter[0]))) return false;
+        // Match buildFixedArgs: explicit arguments fill unshared slots, but only technical slots disappear.
+        int consumed = 0;
+        var arguments = tree.getTypeArguments();
+        for (String[] parameter : parameters) {
+            if (!scope.typeParameterInScope(parameter[0])) {
+                consumed++;
+            } else if (parameter[1].equals("false")) {
+                int insertion = consumed < arguments.size()
+                        ? (int) positions.getStartPosition(unit, arguments.get(consumed))
+                        : (int) positions.getEndPosition(unit, arguments.get(arguments.size() - 1));
+                addInsertion(insertion, consumed < arguments.size()
+                        ? parameter[0] + ", " : ", " + parameter[0]);
+            }
+        }
+        return true;
+    }
+
+    private static boolean containsType(Tree type, Tree expected) {
+        return type == expected || type instanceof AnnotatedTypeTree annotated
+                && containsType(annotated.getUnderlyingType(), expected);
     }
 
     private void patchDeclaration(ClassTree tree, List<String[]> paramOrder) {

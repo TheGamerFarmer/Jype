@@ -20,6 +20,59 @@ class JypePublicViewTest {
             "fr.thegamerfarmer.jype.JypeProcessorShim", "-Xlint:rawtypes,unchecked", "-Werror"};
 
     @Test
+    void compatibilitySmokeKeepsSharedOrdinaryInheritanceArguments(@TempDir Path root) throws Exception {
+        Path classes = root.resolve("classes");
+        JypeTestCompiler.compileTo(Map.of(
+                "smoke/package-info.java", """
+                        @fr.thegamerfarmer.jype.annotations.TypeSystem({
+                            @fr.thegamerfarmer.jype.annotations.TypeDef(name = "TYPE", bound = String.class)
+                        })
+                        package smoke;
+                        """,
+                "smoke/Consumer.java", """
+                        package smoke;
+                        class Base<TYPE> { TYPE value; }
+                        class Consumer extends Base {}
+                        class Generic<A, B> {}
+                        class Partial<A> extends Generic<String> {}
+                        """), classes, List.of(), STRICT).assertSuccess();
+        String source = Files.readString(root.resolve("jype-javadoc-src").resolve("smoke").resolve("Consumer.java"));
+        assertTrue(source.contains("class Generic<A, B>"), source);
+        assertTrue(source.contains("extends Generic<A, String>"), source);
+        render(root.resolve("jype-javadoc-src"), root.resolve("html"));
+    }
+
+    @Test
+    void publicInheritanceRestoresSharedParametersAtEveryPosition(@TempDir Path root) throws Exception {
+        Path classes = root.resolve("classes");
+        JypeTestCompiler.compileTo(Map.of(
+                "shared/package-info.java", """
+                        @fr.thegamerfarmer.jype.annotations.TypeSystem(
+                            @fr.thegamerfarmer.jype.annotations.TypeDef(name="TYPE", bound=String.class))
+                        package shared;
+                        """,
+                "shared/Examples.java", """
+                package shared;
+                public class Examples {
+                    public static class Generic<A, B, C> {}
+                    public interface Contract<A, B, C> {}
+                    public static class Leading<A, B> extends Generic<String> {}
+                    public static class Middle<B> extends Generic<String, Integer> {}
+                    public static class Trailing<B, C> extends Generic<String> {}
+                    public static class Implementation<B> implements Contract<String, Integer> {}
+                }
+                """), classes, List.of(), STRICT).assertSuccess();
+        String source = Files.readString(root.resolve("jype-javadoc-src").resolve("shared").resolve("Examples.java"));
+        assertTrue(source.contains("extends Generic<A, B, String>"), source);
+        assertTrue(source.contains("extends Generic<String, B, Integer>"), source);
+        assertTrue(source.contains("extends Generic<String, B, C>"), source);
+        assertTrue(source.contains("implements Contract<String, B, Integer>"), source);
+        render(root.resolve("jype-javadoc-src"), root.resolve("html"));
+        assertTrue(Files.readString(root.resolve("html").resolve("shared").resolve("Examples.Middle.html"))
+                .replaceAll("<[^>]*>", "").contains("Generic&lt;String"));
+    }
+
+    @Test
     void transformedLibraryApiAndConsumerKeepJvmTypesAndRenderPublicAliases(@TempDir Path root) throws Exception {
         assertTrue(root.toAbsolutePath().startsWith(Path.of("target").toAbsolutePath()));
         Map<String, String> library = new LinkedHashMap<>();

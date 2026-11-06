@@ -30,6 +30,28 @@ public abstract class JypeJavaFixture extends LightJavaCodeInsightFixtureTestCas
                     TypeDef[] overrides() default {};
                 }
                 """);
+        myFixture.addClass("""
+                package fr.thegamerfarmer.jype.annotations;
+                @java.lang.annotation.Retention(java.lang.annotation.RetentionPolicy.CLASS)
+                @java.lang.annotation.Target(java.lang.annotation.ElementType.TYPE)
+                public @interface JypeClass {
+                    int version() default 1;
+                    String[] managedParameters();
+                    String[] declaredParameters() default {};
+                    String typeSystem();
+                }
+                """);
+        myFixture.addClass("""
+                package fr.thegamerfarmer.jype.annotations;
+                @java.lang.annotation.Retention(java.lang.annotation.RetentionPolicy.CLASS)
+                @java.lang.annotation.Target({java.lang.annotation.ElementType.METHOD, java.lang.annotation.ElementType.FIELD})
+                public @interface JypeMember {
+                    int version() default 1;
+                    String sourceType() default "";
+                    String[] declaredParameters() default {};
+                    boolean generated() default false;
+                }
+                """);
     }
 
     protected PsiJavaFile define(String pkg, String body) {

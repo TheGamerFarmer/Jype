@@ -98,6 +98,14 @@ final class StaticOwners {
         return data == null ? List.of() : data.parameters();
     }
 
+    Set<String> managedParameters(String name) {
+        if (name == null) return Set.of();
+        if (parameters.containsKey(name)) return managed;
+        var data = compiled(name);
+        return data == null || data.publicView() == null ? Set.of()
+                : new LinkedHashSet<>(data.publicView().managedParameters());
+    }
+
     private TypeSystemClassFileReader.ClassData compiled(String name) {
         if (!compiledClasses.containsKey(name)) compiledClasses.put(name, readClass.apply(name));
         return compiledClasses.get(name);

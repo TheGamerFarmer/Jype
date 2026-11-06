@@ -41,6 +41,9 @@ patchPluginXml {
 test {
     systemProperty 'java.awt.headless', 'true'
     systemProperty 'jype.test.jdk', System.getProperty('java.home')
+    if (project.hasProperty('jypeTestEngine')) {
+        systemProperty 'jype.test.engine', file(project.property('jypeTestEngine')).absolutePath
+    }
     finalizedBy jacocoTestReport
     jacoco {
         includeNoLocationClasses = true

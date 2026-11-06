@@ -22,6 +22,15 @@ The IDE plugin does not compile the language or replace the engine. The engine
 does not depend on IntelliJ. When an IDE diagnostic differs from the compilation
 result, the javac build with Jype is the reference.
 
+Jype's public view keeps the names declared by `@TypeDef`: a signature remains
+`PLAYER getPlayer()` even when a consuming project overrides `PLAYER` with a
+concrete class. Technical parameters are used internally for Java's type
+checking, not as arguments that consumers must repeat. The IntelliJ integration
+reads library metadata to present those declarations without the injected
+parameter lists, while preserving ordinary Java generics. Its remaining
+analysis boundaries are documented in the
+[plugin guide](Plugin/README.md#public-signatures-and-documentation).
+
 ## Using the engine from Maven
 
 Stable engine releases are published to a public Maven repository on GitHub

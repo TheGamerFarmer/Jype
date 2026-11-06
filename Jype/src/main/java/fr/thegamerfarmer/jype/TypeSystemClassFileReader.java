@@ -29,7 +29,14 @@ final class TypeSystemClassFileReader {
     record TypeSystemData(Set<String> names, String parentPackage, java.util.Map<String, String> bounds) {}
     /** Static overloads with incompatible generic orders are represented by an empty order. */
     record ClassData(List<String> parameters, java.util.Map<String, List<String>> staticMethods,
-                     Set<String> fields, String parent) {}
+                     Set<String> fields, String parent, PublicView publicView, List<MemberView> memberViews) {}
+
+    /** Validated version-one origin metadata; null on legacy classes. */
+    record PublicView(List<String> managedParameters, List<String> declaredParameters, String typeSystem) {}
+    /** Source identity is paired with the unchanged JVM descriptor to distinguish overloads. */
+    record MemberView(String name, String descriptor, String sourceType,
+                      List<String> declaredParameters, boolean generated) {}
+    private record Attributes(String signature, List<AnnotationData> annotations) {}
 
     private record AnnotationData(String descriptor, java.util.Map<String, Object> values) {}
 
@@ -55,39 +62,109 @@ final class TypeSystemClassFileReader {
             String parent = parentIndex == 0 ? "" : utf8[classes[parentIndex]].replace('/', '.').replace('$', '.');
             skipInterfaces(input);
             Set<String> fields = new LinkedHashSet<>();
+            List<MemberView> memberViews = new ArrayList<>();
             int fieldCount = input.readUnsignedShort();
             for (int i = 0; i < fieldCount; i++) {
                 input.readUnsignedShort();
-                fields.add(utf8[input.readUnsignedShort()]);
-                input.readUnsignedShort();
-                readSignature(input, utf8);
+                String name = utf8[input.readUnsignedShort()];
+                fields.add(name);
+                String descriptor = utf8[input.readUnsignedShort()];
+                Attributes attributes = readAttributes(input, utf8);
+                collectMemberView(name, descriptor, attributes, memberViews);
             }
             java.util.Map<String, List<String>> methods = new java.util.LinkedHashMap<>();
             int methodCount = input.readUnsignedShort();
             for (int i = 0; i < methodCount; i++) {
                 int flags = input.readUnsignedShort();
                 String name = utf8[input.readUnsignedShort()];
-                input.readUnsignedShort();
-                String signature = readSignature(input, utf8);
+                String descriptor = utf8[input.readUnsignedShort()];
+                Attributes attributes = readAttributes(input, utf8);
+                collectMemberView(name, descriptor, attributes, memberViews);
+                String signature = attributes.signature();
                 if ((flags & 0x0008) == 0) continue;
                 List<String> parameters = signatureParameters(signature);
                 if (methods.containsKey(name) && !methods.get(name).equals(parameters)) parameters = List.of();
                 methods.put(name, parameters);
             }
-            return new ClassData(signatureParameters(readSignature(input, utf8)), methods, fields, parent);
+            Attributes attributes = readAttributes(input, utf8);
+            PublicView publicView = null;
+            for (AnnotationData annotation : attributes.annotations()) {
+                if (annotation.descriptor().equals("Lfr/thegamerfarmer/jype/annotations/JypeClass;")) {
+                    publicView = publicView(annotation);
+                }
+            }
+            List<String> parameters = signatureParameters(attributes.signature());
+            if (publicView != null && (!parameters.containsAll(publicView.declaredParameters())
+                    || !parameters.stream().filter(publicView.managedParameters()::contains).toList()
+                    .equals(publicView.managedParameters()))) {
+                throw new IOException("JypeClass parameter origins disagree with JVM signature");
+            }
+            return new ClassData(parameters, methods, fields, parent, publicView, List.copyOf(memberViews));
         }
     }
 
-    private static String readSignature(DataInputStream input, String[] utf8) throws IOException {
+    private static PublicView publicView(AnnotationData annotation) throws IOException {
+        Object version = annotation.values().getOrDefault("version", 1);
+        if (!Integer.valueOf(1).equals(version)) throw new IOException("Unsupported JypeClass metadata version: " + version);
+        List<String> managed = parameterNames(annotation.values().get("managedParameters"));
+        List<String> declared = parameterNames(annotation.values().getOrDefault("declaredParameters", List.of()));
+        Object system = annotation.values().get("typeSystem");
+        if (!(system instanceof String name) || name.isEmpty()) throw new IOException("Invalid JypeClass typeSystem");
+        for (String part : name.split("\\.", -1)) {
+            if (!javax.lang.model.SourceVersion.isIdentifier(part) || javax.lang.model.SourceVersion.isKeyword(part)) {
+                throw new IOException("Invalid JypeClass typeSystem: " + name);
+            }
+        }
+        return new PublicView(managed, declared, name);
+    }
+
+    private static List<String> parameterNames(Object value) throws IOException {
+        if (!(value instanceof List<?> values)) throw new IOException("Missing JypeClass parameter list");
+        List<String> names = new ArrayList<>();
+        for (Object item : values) {
+            if (!(item instanceof String name) || !javax.lang.model.SourceVersion.isIdentifier(name)
+                    || javax.lang.model.SourceVersion.isKeyword(name) || names.contains(name)) {
+                throw new IOException("Invalid JypeClass parameter name: " + item);
+            }
+            names.add(name);
+        }
+        return List.copyOf(names);
+    }
+
+    private static void collectMemberView(String name, String descriptor, Attributes attributes,
+                                          List<MemberView> members) throws IOException {
+        for (AnnotationData annotation : attributes.annotations()) {
+            if (!annotation.descriptor().equals("Lfr/thegamerfarmer/jype/annotations/JypeMember;")) continue;
+            Object version = annotation.values().getOrDefault("version", 1);
+            if (!Integer.valueOf(1).equals(version)) throw new IOException("Unsupported JypeMember metadata version: " + version);
+            Object source = annotation.values().getOrDefault("sourceType", "");
+            Object generated = annotation.values().getOrDefault("generated", 0);
+            if (!(source instanceof String type) || !(generated instanceof Integer flag) || flag < 0 || flag > 1) {
+                throw new IOException("Invalid JypeMember metadata");
+            }
+            members.add(new MemberView(name, descriptor, type,
+                    parameterNames(annotation.values().getOrDefault("declaredParameters", List.of())), flag == 1));
+        }
+    }
+
+    private static Attributes readAttributes(DataInputStream input, String[] utf8) throws IOException {
         String signature = "";
+        List<AnnotationData> annotations = new ArrayList<>();
         int attributes = input.readUnsignedShort();
         for (int i = 0; i < attributes; i++) {
             String name = utf8[input.readUnsignedShort()];
             long length = Integer.toUnsignedLong(input.readInt());
             if (name.equals("Signature") && length == 2) signature = utf8[input.readUnsignedShort()];
-            else skipFully(input, length);
+            else if (name.equals("RuntimeInvisibleAnnotations") || name.equals("RuntimeVisibleAnnotations")) {
+                byte[] data = input.readNBytes(Math.toIntExact(length));
+                if (data.length != length) throw new IOException("Truncated annotation attribute");
+                try (var values = new DataInputStream(new ByteArrayInputStream(data))) {
+                    int count = values.readUnsignedShort();
+                    for (int a = 0; a < count; a++) annotations.add(readAnnotation(values, utf8));
+                }
+            } else skipFully(input, length);
         }
-        return signature;
+        return new Attributes(signature, annotations);
     }
 
     private static List<String> signatureParameters(String signature) throws IOException {
@@ -173,7 +250,8 @@ final class TypeSystemClassFileReader {
             int tag = input.readUnsignedByte();
             switch (tag) {
                 case 1 -> utf8[i] = input.readUTF();
-                case 3, 4 -> skipFully(input, 4);
+                case 3 -> utf8[i] = Integer.toString(input.readInt());
+                case 4 -> skipFully(input, 4);
                 case 5, 6 -> {
                     skipFully(input, 8);
                     i++;
@@ -253,7 +331,8 @@ final class TypeSystemClassFileReader {
                 yield utf8[input.readUnsignedShort()];
             }
             case 'c' -> utf8[input.readUnsignedShort()];
-            case 'B', 'C', 'D', 'F', 'I', 'J', 'S', 'Z' -> {
+            case 'I', 'Z' -> Integer.valueOf(utf8[input.readUnsignedShort()]);
+            case 'B', 'C', 'D', 'F', 'J', 'S' -> {
                 input.readUnsignedShort();
                 yield null;
             }

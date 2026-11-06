@@ -56,6 +56,8 @@ public class JypeProcessor extends AbstractProcessor {
     private TypeParamInjector typeParamInjector;
     private TypeInjectionPass typeInjectionPass;
     private JavadocSourceGenerator javadocGenerator;
+    private DeclarationOrigins origins;
+    private final Map<TypeElement, Map<String, TypeMirror>> publicClasses = new LinkedHashMap<>();
     private final Map<String, Map<String, TypeMirror>> typeSystems = new LinkedHashMap<>();
 
     /**
@@ -94,7 +96,15 @@ public class JypeProcessor extends AbstractProcessor {
                 typeParamInjector.getInjectedTypeParams());
         javadocGenerator = new JavadocSourceGenerator(env, typeParamInjector.getOriginalParamOrders());
         JypePlugin plugin = ctx.get(JypePlugin.class);
+        origins = plugin == null ? new DeclarationOrigins() : plugin.origins();
         if (plugin != null) javadocGenerator.addStaticEdits(plugin.staticSourceEdits());
+        com.sun.source.util.JavacTask.instance(env).addTaskListener(new com.sun.source.util.TaskListener() {
+            @Override public void started(com.sun.source.util.TaskEvent event) {
+                if (event.getKind() == com.sun.source.util.TaskEvent.Kind.GENERATE) {
+                    publishPublicView(event.getTypeElement());
+                }
+            }
+        });
     }
 
     /**
@@ -105,7 +115,9 @@ public class JypeProcessor extends AbstractProcessor {
     @Override
     public boolean process(Set<? extends TypeElement> annotations, @NotNull RoundEnvironment roundEnv) {
         if (roundEnv.processingOver()) {
-            if (!roundEnv.errorRaised()) javadocGenerator.generate(processedSourceFiles.values());
+            if (!roundEnv.errorRaised()) {
+                javadocGenerator.generate(processedSourceFiles.values());
+            }
             return false;
         }
 
@@ -119,8 +131,6 @@ public class JypeProcessor extends AbstractProcessor {
                 typeSystems.put(pkgElement.getQualifiedName().toString(), resolvedTypes);
             }
         }
-        if (typeSystems.isEmpty()) return false;
-
         typeParamInjector.clearRound();
 
         List<TypeElement> classes = new ArrayList<>();
@@ -136,10 +146,14 @@ public class JypeProcessor extends AbstractProcessor {
             }
         }
 
+        if (classes.isEmpty() && typeSystems.isEmpty()) return false;
         javadocGenerator.ensureOutputDir();
         collectSourceFiles(roundEnv);
 
         for (TypeElement classElement : classes) {
+            if (trees.getTree(classElement) instanceof com.sun.tools.javac.tree.JCTree.JCClassDecl tree) {
+                origins.capture(tree, classElement.getQualifiedName().toString());
+            }
             typeParamInjector.injectMissingTypeParams(classElement, classTypeSystems.get(classElement));
         }
         for (TypeElement classElement : classes) {
@@ -153,9 +167,35 @@ public class JypeProcessor extends AbstractProcessor {
         return false;
     }
 
+    private void publishPublicView(TypeElement element) {
+        if (element == null) return;
+        Map<String, TypeMirror> system = publicClasses.entrySet().stream()
+                .filter(entry -> entry.getKey().getQualifiedName().contentEquals(element.getQualifiedName()))
+                .map(Map.Entry::getValue).findFirst().orElse(null);
+        if (system != null) origins.publish(element, system.keySet(),
+                typeSystems.entrySet().stream().filter(entry -> entry.getValue() == system)
+                        .map(Map.Entry::getKey).findFirst().orElseThrow(), processingEnv);
+        if (system != null) origins.publishMembers(element, processingEnv);
+        for (Element member : element.getEnclosedElements()) {
+            if (member instanceof TypeElement nested) publishPublicView(nested);
+        }
+    }
+
     @Nullable
     private Map<String, TypeMirror> findClassTypeSystem(TypeElement cls, Set<String> visited) {
         if (!visited.add(cls.getQualifiedName().toString())) return null;
+        String packageName = processingEnv.getElementUtils().getPackageOf(cls).getQualifiedName().toString();
+        while (!packageName.isEmpty()) {
+            if (typeSystems.containsKey(packageName)) break;
+            PackageElement candidate = processingEnv.getElementUtils().getPackageElement(packageName);
+            if (candidate != null && candidate.getAnnotation(fr.thegamerfarmer.jype.annotations.TypeSystem.class) != null) {
+                Map<String, TypeMirror> resolved = typeSystemResolver.resolve(candidate);
+                if (resolved != null) typeSystems.put(packageName, resolved);
+                break;
+            }
+            int dot = packageName.lastIndexOf('.');
+            packageName = dot < 0 ? "" : packageName.substring(0, dot);
+        }
         Map<String, TypeMirror> local = findTypeSystem(
                 processingEnv.getElementUtils().getPackageOf(cls), typeSystems);
         if (local != null) return local;
@@ -185,6 +225,16 @@ public class JypeProcessor extends AbstractProcessor {
 
     private void trackAllJypeClassForJavadoc(TypeElement classElement,
                                               Map<String, TypeMirror> resolvedTypes) {
+        javadocGenerator.addDependency(classElement.getSuperclass());
+        classElement.getInterfaces().forEach(javadocGenerator::addDependency);
+        for (Element enclosed : classElement.getEnclosedElements()) {
+            if (enclosed instanceof javax.lang.model.element.VariableElement field) {
+                javadocGenerator.addDependency(field.asType());
+            } else if (enclosed instanceof javax.lang.model.element.ExecutableElement method) {
+                javadocGenerator.addDependency(method.getReturnType());
+                method.getParameters().forEach(parameter -> javadocGenerator.addDependency(parameter.asType()));
+            }
+        }
         for (Element enclosed : classElement.getEnclosedElements()) {
             if (enclosed.getKind() == ElementKind.CLASS || enclosed.getKind() == ElementKind.INTERFACE) {
                 trackAllJypeClassForJavadoc((TypeElement) enclosed, resolvedTypes);
@@ -200,9 +250,10 @@ public class JypeProcessor extends AbstractProcessor {
                 })
                 .collect(java.util.stream.Collectors.toList());
 
-        boolean hasJypeParam = paramOrder.stream().anyMatch(p -> "true".equals(p[1]));
-        if (!hasJypeParam) return;
-
+        publicClasses.put(classElement, resolvedTypes);
+        javadocGenerator.addOrigin(qualName, origins.parameterOrder(qualName, resolvedTypes.keySet()));
+        javadocGenerator.addAliases(processingEnv.getElementUtils().getPackageOf(classElement)
+                .getQualifiedName().toString(), resolvedTypes.keySet());
         javadocGenerator.addDeclPatch(qualName, paramOrder);
     }
 

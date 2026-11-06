@@ -27,6 +27,14 @@ public final class JypeTypeSystemAnnotator implements Annotator {
                     holder.newAnnotation(HighlightSeverity.ERROR, problem.message()).range(problem.element()).create();
                 }
             }
+            if (completion == null) {
+                JypeContextualTypes.Completion contextual = JypeContextualTypes.complete(reference);
+                if (contextual != null) {
+                    for (JypeInheritanceArguments.Problem problem : contextual.problems()) {
+                        holder.newAnnotation(HighlightSeverity.ERROR, problem.message()).range(problem.element()).create();
+                    }
+                }
+            }
             return;
         }
         if (!(element instanceof PsiAnnotation annotation)

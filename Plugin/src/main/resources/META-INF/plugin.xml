@@ -14,6 +14,8 @@
       <li>Renaming declarations and their usages, with undo support</li>
       <li>Annotation diagnostics and cast analysis based on bounds</li>
       <li>Partial generic inheritance diagnostics for source and compiled libraries</li>
+      <li>Contextual library member types and public Jype signatures without technical parameters</li>
+      <li>Jype alias presentation in documentation, completion and parameter help</li>
       <li>Structural configuration of the local Maven POM, with undo support</li>
     </ul>
     The engine is still required for compilation. The editor's virtual types
@@ -26,6 +28,14 @@
   <depends>com.intellij.modules.java</depends>
 
   <extensions defaultExtensionNs="com.intellij">
+    <lang.documentationProvider language="JAVA" order="first"
+        implementationClass="fr.thegamerfarmer.jype.plugin.JypeDocumentationProvider"/>
+    <lang.parameterInfo language="JAVA" order="first"
+        implementationClass="fr.thegamerfarmer.jype.plugin.JypeParameterInfoHandler"/>
+    <completion.contributor language="JAVA" order="first"
+        implementationClass="fr.thegamerfarmer.jype.plugin.JypeSignatureCompletionContributor"/>
+    <lang.psiAugmentProvider
+        implementation="fr.thegamerfarmer.jype.plugin.JypeTypeAugmentProvider"/>
     <psi.referenceContributor language="JAVA"
         implementation="fr.thegamerfarmer.jype.plugin.JypeTypeReferenceContributor"/>
     <renamePsiElementProcessor
@@ -45,6 +55,8 @@
         implementationClass="fr.thegamerfarmer.jype.plugin.JypeTypeSystemAnnotator"/>
     <lang.inspectionSuppressor language="JAVA"
         implementationClass="fr.thegamerfarmer.jype.plugin.JypeCastInspectionSuppressor"/>
+    <lang.inspectionSuppressor language="JAVA"
+        implementationClass="fr.thegamerfarmer.jype.plugin.JypeRawTypeInspectionSuppressor"/>
 
     <java.elementFinder
         implementation="fr.thegamerfarmer.jype.plugin.JypePsiElementFinder"

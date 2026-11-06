@@ -48,6 +48,25 @@ final class ParsedTypeSystems {
             collectInheritedNames(packageName, definitions, parents, new HashSet<>(), names);
             result.put(packageName, names);
         }
+        for (var unit : units) {
+            String packageName = PreEnterTrees.getCuPackage(unit);
+            while (!packageName.isEmpty()) {
+                if (definitions.containsKey(packageName)) break;
+                Set<String> names = compiledNames(packageName);
+                if (!names.isEmpty()) {
+                    result.putIfAbsent(packageName, names);
+                    break;
+                }
+                int dot = packageName.lastIndexOf('.');
+                packageName = dot < 0 ? "" : packageName.substring(0, dot);
+            }
+        }
+        return result;
+    }
+
+    Set<String> compiledNames(String packageName) {
+        Set<String> result = new LinkedHashSet<>();
+        collectCompiledNames(packageName, new HashSet<>(), result);
         return result;
     }
 

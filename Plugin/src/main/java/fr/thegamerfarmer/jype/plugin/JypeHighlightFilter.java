@@ -31,7 +31,8 @@ public final class JypeHighlightFilter implements HighlightInfoFilter {
                 && reference != null
                 && reference.getParameterList().getTextRange().equals(
                         new com.intellij.openapi.util.TextRange(info.getStartOffset(), info.getEndOffset()))) {
-            return JypeInheritanceArguments.complete(reference) == null;
+            return JypeContextualTypes.complete(reference) == null
+                    && JypeInheritanceArguments.complete(reference) == null;
         }
         if (!description.startsWith("Cannot resolve symbol")) return true;
         if (reference == null || reference.isQualified() || reference.resolve() != null) return true;

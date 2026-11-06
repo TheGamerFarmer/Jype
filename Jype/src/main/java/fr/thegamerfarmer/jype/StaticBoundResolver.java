@@ -66,6 +66,10 @@ final class StaticBoundResolver {
         }
     }
 
+    Map<String, String> effectiveBounds(String scope) {
+        return bounds.computeIfAbsent(scope, key -> readStaticBounds(key, new HashSet<>()));
+    }
+
     private void inheritStaticBounds(String scope, Map<String, String> parents, Set<String> visited) {
         if (!visited.add(scope)) return;
         String parent = parents.get(scope);

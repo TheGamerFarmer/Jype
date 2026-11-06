@@ -397,7 +397,7 @@ class JavadocSourceGeneratorTest {
         Path output = directory.resolve("jype-javadoc-src");
         assertTrue(Files.exists(output.resolve("first").resolve("Same.java")));
         assertTrue(Files.exists(output.resolve("second").resolve("Same.java")));
-        assertTrue(Files.readString(output.resolve("second").resolve("Same.java")).contains("class Same<TYPE>"));
+        assertTrue(Files.readString(output.resolve("second").resolve("Same.java")).contains("class Same {}"));
         assertFalse(Files.exists(output.resolve("broken").resolve("Broken.java")));
         List<String> generationWarnings = diagnostics.getDiagnostics().stream()
                 .filter(d -> d.getKind() == Diagnostic.Kind.WARNING)

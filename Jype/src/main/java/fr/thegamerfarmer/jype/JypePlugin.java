@@ -83,4 +83,8 @@ public final class JypePlugin implements Plugin {
     Map<String, List<JavadocSourceGenerator.SourceEdit>> staticSourceEdits() {
         return transformer.staticSourceEdits();
     }
+
+    DeclarationOrigins origins() {
+        return transformer.origins;
+    }
 }

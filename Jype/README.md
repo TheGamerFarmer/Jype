@@ -110,8 +110,8 @@ Rules:
 - A subpackage uses the nearest annotated type system. Neighboring systems can
   map the same name to different types without affecting each other.
 - Without a local annotation, a class can also inherit the type system of its
-  source superclass. Separate compilation requires the consumer package to
-  declare `inherit` explicitly.
+  source superclass or a metadata-bearing compiled superclass. A consumer
+  defining new mappings still declares `inherit` and `overrides` on its package.
 
 ## Ordinary parameters, partial ownership, and references
 
@@ -134,10 +134,13 @@ removing user-supplied arguments.
 
 Completion also reads the generic signatures of separately compiled classes
 from the classpath, before javac validates arity. Consumers of a Jype library
-can therefore omit its managed arguments in an `extends` clause while supplying
-ordinary arguments explicitly, including a parameter shared by name with their
-own class. The consumer must inherit the library's type system and run both
-the javac plugin and the processor.
+can therefore omit its managed arguments in inheritance, fields, return and
+parameter types, locals, casts, collections and creations while supplying
+ordinary arguments explicitly. Completion uses lexical managed variables for
+templates, or the effective package's concrete mappings for bound consumers.
+The consumer must have a resolvable type system and run both the javac plugin
+and the processor. Genuine raw Java types and unchecked conversions remain
+diagnostics; no blanket warning suppression is installed.
 
 A template that owns only some managed parameters can receive the missing ones.
 Abstract classes also allow propagation from a generic superclass. A concrete
@@ -151,7 +154,7 @@ Completion covers, among other cases:
 | Source superclasses | Raw/partial clauses completed before Enter |
 | Compiled superclasses | Package metadata and parameters read during processing |
 | Member classes | Recursive processing, resolution by qualified names |
-| Fields and signatures | Managed arguments added to partial types when their order is known |
+| Fields, signatures, locals, casts and creations | Raw/partial managed types completed with lexical variables or concrete mappings |
 | Local types in methods | Detection in blocks, loops, switch statements, lambdas, and anonymous bodies |
 | Generic bounds | Dependencies propagated; explicit bounds preserved |
 | Nested wildcards | Missing arguments completed when their declaration is known |
@@ -162,6 +165,30 @@ A **value** identifier named `PLAYER`, or a qualified class `other.PLAYER`, must
 not trigger parameter injection. Ordinary generics and genuine raw usages
 without managed context remain normal Java constructs; Jype does not replace
 javac inference.
+
+## Public declarations versus JVM signatures
+
+The application JAR retains its complete generic `Signature` attributes, JVM
+descriptors, and static storage behavior. Jype-aware tools use CLASS-retained
+origin metadata to distinguish the technical parameters from ordinary Java
+generics. An IDE without Jype can still show the internal parameters.
+
+`fr.thegamerfarmer.jype.annotations.JypeClass` has version `1`,
+`managedParameters` (final technical order), `declaredParameters` (the names
+written by the author **before Enter**), and `typeSystem` (the effective
+declaring package). `JypeMember` records the original field/return `sourceType`,
+original method `declaredParameters`, and `generated` helper provenance.
+Neither annotation is runtime-retained or changes binary method signatures.
+Unsupported versions or inconsistent metadata fail explicitly rather than
+silently hiding Java parameters.
+
+The public signature remains `PLAYER getPlayer()` or `List<PLAYER>`, even when
+the caller's effective mapping is `BattlePlayer`. That spelling describes the
+declaration; compilation still checks the caller's concrete type. Ordinary
+method parameters such as `<PLAYER extends Number>` that shadow an alias remain
+ordinary generics. Older JARs remain usable through package metadata and JVM
+signatures where the existing rules establish ownership; recompilation provides
+precise declaration origins.
 
 ## Static members: shared storage, generic views
 
@@ -243,14 +270,26 @@ build: `target/jype-javadoc-src`.
 The original sources are never modified. The patcher uses syntax positions to
 preserve comments, strings, dimension annotations, and ordinary arguments.
 Paths follow the declared package, including for generated or in-memory
-sources. Missing parameters in a scope become wildcards when appropriate; a
-genuine raw usage with no managed parameters available remains raw.
+sources. The documentary copies hide managed class parameters, technical
+arguments, recursive expansions and static helper implementations. Ordinary
+generics, their bounds, comments and method-level alias shadows are preserved.
+Technical `@param` tags disappear with their parameters.
+
+Documentary alias interfaces, such as `PLAYER`, provide real Javadoc links.
+Metadata-bearing compiled ancestors and referenced managed types receive
+doc-only declaration shells so their internal signatures do not leak into
+hierarchy and inherited-member sections. Dependency shells cannot recover
+comments absent from a compiled JAR; a library's own copies preserve its source
+comments. **Never compile `jype-javadoc-src` into the application**: its aliases
+and shells are documentary types, not runtime replacements.
 
 Use these copies as input to the Javadoc tool, not the original abbreviated
 sources. A generation failure is a warning separate from compilation. Invalid
 files, duplicate destinations, and ambiguous imports are not guessed
-silently. Do not treat old copies as the result of a failed compilation: they
-are not regenerated when javac reports an error.
+silently. Previously generated Java copies are cleared when the output path is
+initialized; a failed generation is not presented as newly generated output.
+The engine generates sources, not HTML: run the standard Javadoc tool over
+these copies to publish documentation.
 
 ## Diagnostics
 
@@ -283,6 +322,7 @@ includes the license text and attribution notices.
 |---|---|
 | `JypePlugin` | Collects PARSE events and triggers one transformation at the first Enter |
 | `PreEnterTransformer` | Coordinates pre-Enter collaborators and isolates type systems |
+| `DeclarationOrigins` | Captures source provenance before Enter and publishes metadata on final generation symbols |
 | `SourceHierarchy` | Canonical index of declarations and concrete mappings per type system |
 | `ParsedTypeSystems` | Reads managed names before symbols exist |
 | `SourceTypeResolver` | Lexical/import resolution and classpath probing without loading classes |
@@ -298,6 +338,7 @@ includes the license text and attribution notices.
 | `TypeInjectionPass` | Adds recursive bounds and field/superclass arguments after Enter |
 | `ProcessorTypeArguments` | Adds mixed arguments after Enter, tracking injections and existing TypeVars |
 | `JavadocSourceGenerator` | Collects and writes copies at the end of processing |
+| `DocumentaryDependencies` | Builds doc-only public declaration shells for compiled managed dependencies |
 | `JavadocSourcePatcher` / `JavadocPatchCollector` / `JavadocTypeScope` | Separates parsing/tokenization, insertion collection, and lexical resolution |
 | `TypeSystemClassFileReader` | Metadata and signatures for separate compilation |
 | Shims and `JypeModuleOpener` | Loading boundary and access to javac internals |

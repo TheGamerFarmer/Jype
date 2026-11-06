@@ -26,6 +26,7 @@ import java.util.function.Function;
  * consistent without exposing generated bridge implementations.
  */
 final class StaticTypeSupport {
+    private DeclarationOrigins origins;
     final TreeMaker make;
     private final StaticOwners owners;
     final Names names;
@@ -117,6 +118,7 @@ final class StaticTypeSupport {
                                     && method.params.size() == (annotation.equals("Getter") ? 0 : 1));
                     if (!exists) {
                         var accessor = accessor(field, view, methodName, annotation.equals("Getter"), access(lombok));
+                        if (origins != null) origins.registerAccessor(owner.name, accessor, field, annotation.equals("Getter"));
                         accessors.add(accessor);
                         generated.add(accessor);
                     }
@@ -124,6 +126,26 @@ final class StaticTypeSupport {
                     if (!exists) owner.methods.put(methodName, List.copyOf(managed));
                 }
             } else if (member instanceof JCTree.JCMethodDecl method && isStatic(method.mods.flags)) {
+                new TreeScanner() {
+                    @Override public void visitMethodDef(JCTree.JCMethodDecl tree) {
+                        tree.restype = completeForMethod(owner.unit, tree.restype);
+                        super.visitMethodDef(tree);
+                    }
+                    @Override public void visitVarDef(JCTree.JCVariableDecl tree) {
+                        tree.vartype = completeForMethod(owner.unit, tree.vartype);
+                        scan(tree.init);
+                    }
+                    @Override public void visitTypeCast(JCTree.JCTypeCast tree) {
+                        if (tree.clazz instanceof JCTree.JCExpression type) {
+                            tree.clazz = completeForMethod(owner.unit, type);
+                        }
+                        scan(tree.expr);
+                    }
+                    @Override public void visitNewClass(JCTree.JCNewClass tree) {
+                        tree.clazz = completeForMethod(owner.unit, tree.clazz);
+                        scan(tree.args);
+                    }
+                }.scan(method);
                 Set<String> explicit = new HashSet<>();
                 method.typarams.forEach(parameter -> explicit.add(parameter.name.toString()));
                 if (usesManaged(method, explicit)) {
@@ -167,6 +189,8 @@ final class StaticTypeSupport {
                 returnType, typeParameters, arguments, com.sun.tools.javac.util.List.nil(),
                 make.Block(0, com.sun.tools.javac.util.List.of(statement)), null);
     }
+
+    void origins(DeclarationOrigins sourceOrigins) { origins = sourceOrigins; }
 
     /** Adds method-owned parameters and records source insertions, preserving explicit ordinary ones. */
     void extendMethod(Owner owner, JCTree.JCMethodDecl method) {
@@ -214,17 +238,47 @@ final class StaticTypeSupport {
         return result;
     }
 
+    private JCTree.JCExpression completeForMethod(JCTree.JCCompilationUnit unit, JCTree.JCExpression type) {
+        boolean template = managed.stream().anyMatch(parameter -> {
+            String bound = bounds.get(parameter);
+            return bound != null && !owners.typeParameters(bound).isEmpty();
+        });
+        return template ? complete(unit, type, true) : type;
+    }
+
     private JCTree.JCExpression complete(JCTree.JCCompilationUnit unit, JCTree.JCExpression type) {
+        return complete(unit, type, false);
+    }
+
+    private JCTree.JCExpression complete(JCTree.JCCompilationUnit unit, JCTree.JCExpression type,
+                                       boolean compiledOnly) {
         return new TreeTranslator() {
+            private JCTree.JCExpression raw(JCTree.JCExpression tree) {
+                String target = resolve.apply(unit, tree);
+                if (target == null) return tree;
+                if (parameters.containsKey(target)) return tree;
+                List<String> params = owners.typeParameters(target);
+                Set<String> technical = owners.managedParameters(target);
+                if (params.isEmpty() || !technical.containsAll(params)) return tree;
+                return make.at(tree.pos).TypeApply(tree, com.sun.tools.javac.util.List.from(params.stream()
+                        .map(parameter -> (JCTree.JCExpression) make.at(tree.pos).Ident(names.fromString(parameter))).toList()));
+            }
+            @Override public void visitIdent(JCTree.JCIdent tree) { result = raw(tree); }
+            @Override public void visitSelect(JCTree.JCFieldAccess tree) { result = raw(tree); }
             @Override public void visitTypeApply(JCTree.JCTypeApply tree) {
-                super.visitTypeApply(tree);
-                List<String> params = parameters.get(resolve.apply(unit, tree.clazz));
-                if (params == null || tree.arguments.isEmpty() || tree.arguments.size() >= params.size()) return;
-                if (params.stream().filter(p -> !managed.contains(p)).count() != tree.arguments.size()) return;
+                tree.arguments = translate(tree.arguments);
+                result = tree;
+                String target = resolve.apply(unit, tree.clazz);
+                if (target == null) return;
+                if (compiledOnly && parameters.containsKey(target)) return;
+                List<String> params = owners.typeParameters(target);
+                Set<String> technical = owners.managedParameters(target);
+                if (tree.arguments.isEmpty() || tree.arguments.size() >= params.size()) return;
+                if (params.stream().filter(p -> !technical.contains(p)).count() != tree.arguments.size()) return;
                 var supplied = tree.arguments.iterator();
                 var args = new ArrayList<JCTree.JCExpression>();
                 for (String param : params) {
-                    args.add(managed.contains(param) ? make.at(tree.pos).Ident(names.fromString(param)) : supplied.next());
+                    args.add(technical.contains(param) ? make.at(tree.pos).Ident(names.fromString(param)) : supplied.next());
                 }
                 tree.arguments = com.sun.tools.javac.util.List.from(args);
             }

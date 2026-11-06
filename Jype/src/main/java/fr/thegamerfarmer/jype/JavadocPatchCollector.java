@@ -23,6 +23,9 @@ final class JavadocPatchCollector extends TreePathScanner<Void, Void> {
     private final Map<String, List<String[]>> originalParamOrders;
     private final List<Token> tokens;
     private final List<TextEdit> edits = new ArrayList<>();
+    private boolean publicView;
+    private com.sun.source.util.DocTrees docTrees;
+    private final Set<Tree> removedTrees = Collections.newSetFromMap(new IdentityHashMap<>());
 
     /** Uses positions from precisely this source text; generated edits never invalidate later positions. */
     JavadocPatchCollector(String source, CompilationUnitTree unit,
@@ -42,6 +45,12 @@ final class JavadocPatchCollector extends TreePathScanner<Void, Void> {
                 knownType, this::getCurrentPath);
     }
 
+    void publicView(com.sun.source.util.DocTrees trees) { publicView = true; docTrees = trees; }
+
+    @Override public Void scan(Tree tree, Void unused) {
+        return removedTrees.contains(tree) ? null : super.scan(tree, unused);
+    }
+
     @Override
     public Void visitClass(ClassTree tree, Void unused) {
         String name = scope.qualifiedName(tree);
@@ -59,6 +68,16 @@ final class JavadocPatchCollector extends TreePathScanner<Void, Void> {
     }
 
     @Override
+    public Void visitTypeParameter(TypeParameterTree tree, Void unused) {
+        if (publicView && getCurrentPath().getParentPath().getLeaf() instanceof ClassTree clazz) {
+            List<String[]> parameters = declarationPatches.get(scope.qualifiedName(clazz));
+            if (parameters != null && parameters.stream()
+                    .anyMatch(p -> p[0].contentEquals(tree.getName()) && p[1].equals("true"))) return null;
+        }
+        return super.visitTypeParameter(tree, unused);
+    }
+
+    @Override
     public Void visitIdentifier(IdentifierTree tree, Void unused) {
         patchRawType(tree);
         return super.visitIdentifier(tree, unused);
@@ -71,6 +90,7 @@ final class JavadocPatchCollector extends TreePathScanner<Void, Void> {
     }
 
     private void patchRawType(Tree tree) {
+        if (publicView) return;
         Tree parent = getCurrentPath().getParentPath().getLeaf();
         // Only type slots are eligible: never imports, class literals, constructor names,
         // qualified-name components, or expressions that happen to have a type's name.
@@ -119,6 +139,19 @@ final class JavadocPatchCollector extends TreePathScanner<Void, Void> {
         int nonJypeCount = (int) paramOrder.stream().filter(p -> "false".equals(p[1])).count();
         List<? extends com.sun.source.tree.Tree> arguments = tree.getTypeArguments();
         if (arguments.isEmpty()) return; // Diamond inference already accounts for the complete declaration.
+        if (publicView) {
+            List<String[]> original = originalParamOrders.get(target);
+            List<String[]> order = original != null && original.size() == arguments.size()
+                    ? original : paramOrder;
+            if (arguments.size() == order.size()) {
+                removeManagedList(arguments, order.stream().map(p -> p[1].equals("true")).toList());
+            } else if (arguments.size() != nonJypeCount && nonJypeCount != 0) {
+                throw new IllegalStateException("Unexpected public Javadoc type argument count for " + tree);
+            } else if (nonJypeCount == 0) {
+                removeManagedList(arguments, Collections.nCopies(arguments.size(), true));
+            }
+            return;
+        }
         if (arguments.size() == paramOrder.size()) return;
         List<String[]> original = originalParamOrders.get(target);
         Set<String> explicitNames;
@@ -159,6 +192,24 @@ final class JavadocPatchCollector extends TreePathScanner<Void, Void> {
     }
 
     private void patchDeclaration(ClassTree tree, List<String[]> paramOrder) {
+        if (publicView) {
+            Set<String> technical = new HashSet<>();
+            paramOrder.stream().filter(p -> p[1].equals("true")).forEach(p -> technical.add(p[0]));
+            var comment = docTrees.getDocCommentTree(getCurrentPath());
+            if (comment != null) {
+                var docPositions = docTrees.getSourcePositions();
+                for (var tag : comment.getBlockTags()) {
+                    if (tag instanceof com.sun.source.doctree.ParamTree parameter && parameter.isTypeParameter()
+                            && technical.contains(parameter.getName().getName().toString())) {
+                        edits.add(new TextEdit((int) docPositions.getStartPosition(unit, comment, tag),
+                                (int) docPositions.getEndPosition(unit, comment, tag), ""));
+                    }
+                }
+            }
+            removeManagedList(tree.getTypeParameters(), tree.getTypeParameters().stream()
+                    .map(p -> technical.contains(p.getName().toString())).toList());
+            return;
+        }
         long start = positions.getStartPosition(unit, tree);
         long end = positions.getEndPosition(unit, tree);
         if (start < 0 || end < 0) throw new IllegalStateException("Missing declaration source positions");
@@ -204,6 +255,35 @@ final class JavadocPatchCollector extends TreePathScanner<Void, Void> {
         }
         if (nextExisting != existing.size()) {
             throw new IllegalStateException("Inconsistent Javadoc parameter order for " + tree.getSimpleName());
+        }
+    }
+
+    private void removeManagedList(List<? extends Tree> nodes, List<Boolean> removed) {
+        if (nodes.isEmpty() || removed.stream().noneMatch(Boolean::booleanValue)) return;
+        for (int i = 0; i < nodes.size(); i++) if (removed.get(i)) removedTrees.add(nodes.get(i));
+        int first = (int) positions.getStartPosition(unit, nodes.get(0));
+        int last = (int) positions.getEndPosition(unit, nodes.get(nodes.size() - 1));
+        if (removed.stream().allMatch(Boolean::booleanValue)) {
+            int opening = firstTokenAt(first) - 1;
+            int closing = firstTokenAt(last);
+            if (opening < 0 || closing >= tokens.size()
+                    || !tokens.get(opening).text().equals("<") || !tokens.get(closing).text().equals(">")) {
+                throw new IllegalStateException("Cannot locate documentary generic delimiters");
+            }
+            edits.add(new TextEdit(tokens.get(opening).start(), tokens.get(closing).end(), ""));
+            return;
+        }
+        int index = 0;
+        while (index < nodes.size()) {
+            if (!removed.get(index)) { index++; continue; }
+            int startIndex = index;
+            while (index < nodes.size() && removed.get(index)) index++;
+            int start = (int) positions.getStartPosition(unit, nodes.get(startIndex));
+            int end = (int) positions.getEndPosition(unit, nodes.get(index - 1));
+            if (index < nodes.size()) end = (int) positions.getStartPosition(unit, nodes.get(index));
+            else start = tokens.get(firstTokenAt((int) positions.getEndPosition(unit,
+                    nodes.get(startIndex - 1)))).start();
+            edits.add(new TextEdit(start, end, ""));
         }
     }
 

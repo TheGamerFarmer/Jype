@@ -27,6 +27,9 @@ final class JavadocSourceGenerator {
     private final Map<String, List<String[]>> originalParamOrders;
     private final Map<String, List<String[]>> declarationPatches = new LinkedHashMap<>();
     private final Map<String, List<SourceEdit>> staticEdits = new LinkedHashMap<>();
+    private final Map<String, Set<String>> aliases = new LinkedHashMap<>();
+    private final Map<String, List<String[]>> sourceOrigins = new LinkedHashMap<>();
+    private final DocumentaryDependencies dependencies;
     private @Nullable Path outputDir;
     private boolean outputDirInitialized;
 
@@ -40,6 +43,7 @@ final class JavadocSourceGenerator {
     JavadocSourceGenerator(ProcessingEnvironment env, Map<String, List<String[]>> originalParamOrders) {
         this.env = env;
         this.originalParamOrders = originalParamOrders;
+        dependencies = new DocumentaryDependencies(env, this::addAliases);
     }
 
     /** Registers pre-Enter static lowering edits keyed by source URI, not filesystem path. */
@@ -52,11 +56,35 @@ final class JavadocSourceGenerator {
         declarationPatches.putIfAbsent(qualifiedName, parameterOrder);
     }
 
+    void addAliases(String packageName, Set<String> names) {
+        aliases.computeIfAbsent(packageName, ignored -> new LinkedHashSet<>()).addAll(names);
+    }
+
+    void addOrigin(String name, List<String[]> parameters) {
+        sourceOrigins.put(name, parameters);
+    }
+
+    void addDependency(javax.lang.model.type.TypeMirror type) {
+        dependencies.collect(type);
+    }
+
     /** Resolves output once, while CLASS_OUTPUT is available during a normal round. */
     void ensureOutputDir() {
         if (!outputDirInitialized) {
             outputDir = computeOutputDir();
             outputDirInitialized = true;
+            if (outputDir != null && Files.exists(outputDir)) {
+                try (var files = Files.walk(outputDir)) {
+                    for (Path file : files.filter(Files::isRegularFile)
+                            .filter(path -> path.toString().endsWith(".java")).toList()) {
+                        Files.delete(file);
+                    }
+                } catch (Exception exception) {
+                    env.getMessager().printMessage(Diagnostic.Kind.WARNING,
+                            "[Jype] Cannot clear stale Javadoc sources: " + exception.getMessage());
+                    outputDir = null;
+                }
+            }
         }
     }
 
@@ -74,11 +102,8 @@ final class JavadocSourceGenerator {
         Set<Path> destinations = new HashSet<>();
         for (JavaFileObject source : sourceFiles) {
             try {
-                StringBuilder lowered = new StringBuilder(readContent(source));
-                staticEdits.getOrDefault(source.toUri().toString(), List.of()).stream()
-                        .sorted(Comparator.comparingInt(SourceEdit::start).reversed())
-                        .forEach(edit -> lowered.replace(edit.start(), edit.end(), edit.replacement()));
-                String content = lowered.toString();
+                // Runtime static lowering is deliberately absent from the documentary view.
+                String content = readContent(source);
                 var parsed = JavadocSourcePatcher.parse(content);
                 Path relative = relativePath(source, parsed.unit());
                 Path destination = outDir.resolve(relative).normalize();
@@ -88,7 +113,12 @@ final class JavadocSourceGenerator {
                 if (!destinations.add(destination)) {
                     throw new IllegalStateException("Duplicate Javadoc output path: " + relative);
                 }
-                content = JavadocSourcePatcher.patchContent(content, parsed, originalParamOrders, declarationPatches,
+                Map<String, List<String[]>> origins = new LinkedHashMap<>(originalParamOrders);
+                origins.putAll(dependencies.parameterOrders(true));
+                origins.putAll(sourceOrigins);
+                Map<String, List<String[]>> declarations = new LinkedHashMap<>(dependencies.parameterOrders(false));
+                declarations.putAll(declarationPatches);
+                content = JavadocSourcePatcher.publicContent(content, parsed, origins, declarations,
                         name -> env.getElementUtils().getTypeElement(name) != null);
                 Files.createDirectories(destination.getParent());
                 Files.writeString(destination, content, StandardCharsets.UTF_8);
@@ -96,6 +126,33 @@ final class JavadocSourceGenerator {
             } catch (Exception exception) {
                 env.getMessager().printMessage(Diagnostic.Kind.WARNING,
                         "[Jype] Failed to write javadoc source for " + source.toUri() + ": " + exception.getMessage());
+            }
+            try {
+                for (var dependency : dependencies.sources().entrySet()) {
+                    Path destination = outDir.resolve(dependency.getKey().replace('.', java.io.File.separatorChar) + ".java");
+                    if (destinations.contains(destination)) continue;
+                    Files.createDirectories(destination.getParent());
+                    Files.writeString(destination, dependency.getValue(), StandardCharsets.UTF_8);
+                }
+            } catch (Exception exception) {
+                env.getMessager().printMessage(Diagnostic.Kind.WARNING,
+                        "[Jype] Failed to write compiled documentary declarations: " + exception.getMessage());
+            }
+            for (var entry : aliases.entrySet()) {
+                for (String alias : entry.getValue()) {
+                    Path destination = outDir.resolve(entry.getKey().replace('.', java.io.File.separatorChar))
+                            .resolve(alias + ".java");
+                    if (destinations.contains(destination)) continue;
+                    try {
+                        Files.createDirectories(destination.getParent());
+                        Files.writeString(destination, "package " + entry.getKey() + ";\n"
+                                + "/** Documentary Jype alias " + alias + "; not a runtime class. */\n"
+                                + "public interface " + alias + " {}\n", StandardCharsets.UTF_8);
+                    } catch (Exception exception) {
+                        env.getMessager().printMessage(Diagnostic.Kind.WARNING,
+                                "[Jype] Failed to write documentary alias " + alias + ": " + exception.getMessage());
+                    }
+                }
             }
         }
         JypeDiagnostics.debug(env,

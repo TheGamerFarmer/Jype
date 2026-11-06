@@ -69,7 +69,20 @@ final class JavadocSourcePatcher {
     }
 
     /** A parse-only tree and positions valid for precisely the input text. */
-    record ParsedSource(CompilationUnitTree unit, SourcePositions positions) {}
+    record ParsedSource(CompilationUnitTree unit, SourcePositions positions, com.sun.source.util.DocTrees docTrees) {}
+
+    static String publicContent(String content, ParsedSource parsed,
+                                Map<String, List<String[]>> originalOrders,
+                                Map<String, List<String[]>> declarationOrders,
+                                Predicate<String> knownType) {
+        Map<String, List<String[]>> uses = new LinkedHashMap<>(originalOrders);
+        uses.putAll(declarationOrders);
+        JavadocPatchCollector collector = new JavadocPatchCollector(content, parsed.unit(), parsed.positions(),
+                uses, declarationOrders, originalOrders, knownType);
+        collector.publicView(parsed.docTrees());
+        collector.scan(parsed.unit(), null);
+        return collector.apply();
+    }
 
     /** Parses without running processors; syntax errors are reported before any output is written. */
     static ParsedSource parse(String content) throws Exception {
@@ -95,7 +108,8 @@ final class JavadocSourcePatcher {
             if (!errors.isEmpty()) {
                 throw new IllegalArgumentException("Cannot parse Javadoc source: " + String.join("; ", errors));
             }
-            return new ParsedSource(unit, Trees.instance(task).getSourcePositions());
+            return new ParsedSource(unit, Trees.instance(task).getSourcePositions(),
+                    com.sun.source.util.DocTrees.instance(task));
         }
     }
 

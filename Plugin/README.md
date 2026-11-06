@@ -40,6 +40,13 @@ on disk. Bounds in a source `package-info` are read by resolving imports
 directly, without re-entering resolution of that file's own `.class`
 expression. A result interrupted by an IDE recursion guard is not cached.
 
+Compiled dependencies can carry Jype's versioned `JypeClass` metadata. It
+identifies managed parameter positions without changing the library's Java
+generic signatures. The plugin reads this metadata through PSI, never by
+loading application classes. Older libraries use their visible package type
+system and parameter names; unknown or invalid metadata is reported in the IDE
+log and is not replaced with guessed mappings.
+
 ## Renaming and project tree
 
 Pressing Shift+F6 on a Jype type usage or its `@TypeDef(name=...)` string
@@ -96,11 +103,50 @@ adaptation affects only the data-flow inspection of the cast type, not its
 other diagnostics. Genuine generic parameters, ordinary Java classes, and
 casts to a narrower bound are not exempt.
 
-**Limitation:** virtual classes provide a view of bounds, not a complete
-execution of the engine's AST transformations. Propagation of implicit parameters
-through inherited member signatures and some F-bounded relationships can still produce IDE diagnostics that
-differ from javac. Resolving a name successfully does not guarantee that the
-code compiles; the build with the engine remains authoritative.
+In a valid caller type system, managed arguments of Jype library types are
+supplied automatically in fields, method signatures, local types and nested
+generic applications. Java member resolution receives the complete substitution:
+an `APIUHC` variable can return `PLAYER` or `List<PLAYER>` through inherited
+methods, rather than their raw erasures. Views of inherited non-generic methods
+and fields also support abbreviated source inheritance. User declarations,
+accessibility and ordinary method parameters remain under Java's control.
+
+Raw-reference diagnostics are suppressed only when all omitted arguments are
+managed and a completed substitution satisfies their bounds. Missing ordinary
+arguments, invalid overrides, genuine unchecked operations and code without a
+valid visible system retain their diagnostics.
+
+## Public signatures and documentation
+
+Documentation, quick navigation, completion and parameter help present Jype
+types by their declared name: `PLAYER getPlayer()`, not the caller's concrete
+`BattlePlayer`, and `APIUHC`, not its injected parameter list. Ordinary Java
+generics and their bounds remain visible. The documentation keeps Java's
+comment content and provides links to the Jype aliases; both the declaration
+and the containing-class presentation omit technical expansions.
+
+Versioned `JypeMember` metadata preserves the original return and field type
+syntax, including aliases erased by static lowering. It also distinguishes
+injected method parameters and technical helpers from ordinary generic
+parameters and business methods. Completion hides only helpers identified by
+valid metadata, never user members merely named `$jype$...`. Missing source
+imports are reconstructed only from unambiguous binary type names; invalid
+metadata or unresolved original types are logged and retain Java's view.
+
+This adaptation is automatic. The canonical Java types and substitutions keep
+their complete generic information; hiding a parameter in presentation never
+removes it from the library's binary contract. Recompile libraries with the
+updated engine to publish precise metadata. An IDE without Jype can still show
+the implementation's generic signatures.
+
+**Limitations:** virtual classes still model bounds rather than executing every
+compiler transformation. In the supported IntelliJ API, `new` expressions do
+not use the type-element inference hook. Generic methods inherited through an
+abbreviated, raw source superclass also retain Java's raw analysis: projecting
+them as additional methods would introduce erasure clashes. Some recursive
+F-bounds and static transformations can consequently differ from javac.
+These paths are not covered by blanket unchecked-warning suppression.
+The build with the engine remains authoritative.
 
 ## Maven configuration
 
@@ -128,7 +174,7 @@ The build and test SDK is IntelliJ IDEA Community 2024.1.7, so the plugin's
 minimum build is 241. Later versions must be checked with Plugin Verifier
 before distribution; having no upper bound does not guarantee compatibility
 with every future version.
-The ZIP was also checked with an IntelliJ IDEA 2026.2.4 installation
+The plugin was also checked with an IntelliJ IDEA 2026.2.4 installation
 (IU-262.11879.100): no binary incompatibilities were detected. Read-action
 and daemon-restart APIs remain deprecated on this version but are retained for
 compatibility with the 2024.1 SDK.
@@ -159,6 +205,18 @@ To verify binary compatibility with a local installation:
 Tests use the IDE's real PSI and cover resolution, scopes, compiled inheritance,
 bound changes, indexing, actual diagnostics, XML modifications, and undo.
 No engine JAR is required to build the plugin.
+The transitive fixture compiles and reads separate library and API JARs before
+compiling their consumer. To additionally exercise actual engine transformations
+instead of the fixture's pre-expanded signatures, build the Java 21 engine JAR
+and run:
+
+```powershell
+.\gradlew.bat test --tests "*JypeTransitiveLibraryTest" "-PjypeTestEngine=C:\path\Jype.jar"
+```
+
+This property configures only the development fixture, not plugin behavior.
+All three compilation stages use strict raw/unchecked lint, and the fixture
+checks real member substitutions, diagnostics and rendered documentation.
 
 `check` also generates Javadoc and enforces at least 80% production line and
 branch coverage with JaCoCo. Reports are in

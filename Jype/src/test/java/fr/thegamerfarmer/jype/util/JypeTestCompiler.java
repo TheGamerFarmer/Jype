@@ -94,6 +94,27 @@ public final class JypeTestCompiler {
         return run(sources, List.of(options), PLUGIN_CLASSPATH, null);
     }
 
+    public static Result compileTo(Map<String, String> sources, Path output, List<Path> dependencies,
+                                   String... options) throws IOException {
+        Files.createDirectories(output);
+        List<File> classpath = new ArrayList<>(PLUGIN_CLASSPATH);
+        dependencies.stream().map(Path::toFile).forEach(classpath::add);
+        return run(sources, List.of(options), classpath, output);
+    }
+
+    public static Path jar(Path classes, Path destination) throws IOException {
+        try (var output = new java.util.jar.JarOutputStream(Files.newOutputStream(destination));
+             var files = Files.walk(classes)) {
+            for (Path file : files.filter(Files::isRegularFile).toList()) {
+                output.putNextEntry(new java.util.jar.JarEntry(
+                        classes.relativize(file).toString().replace(File.separatorChar, '/')));
+                Files.copy(file, output);
+                output.closeEntry();
+            }
+        }
+        return destination;
+    }
+
     /**
      * Compilation WITHOUT Jype (-proc:none disables the processor; no -Xplugin:Jype).
      * Used to verify that some patterns REQUIRE Jype.

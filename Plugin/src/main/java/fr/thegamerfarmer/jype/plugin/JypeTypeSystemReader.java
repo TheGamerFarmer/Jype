@@ -223,7 +223,7 @@ public final class JypeTypeSystemReader {
                 .findClass(definition.boundFqn(), system.declaration().getResolveScope());
         String clause = bound != null && bound.isInterface() ? " implements " : " extends ";
         String source = "package " + system.pkg() + "; public class " + definition.name()
-                + clause + definition.boundFqn() + " {}";
+                + clause + definition.boundFqn() + templateArguments(project, system, bound) + " {}";
         PsiJavaFile file = (PsiJavaFile) PsiFileFactory.getInstance(project)
                 .createFileFromText(definition.name() + ".java", JavaFileType.INSTANCE, source);
         ((com.intellij.psi.impl.source.PsiFileImpl) file)
@@ -233,6 +233,28 @@ public final class JypeTypeSystemReader {
         created.putUserData(DECLARATION, system);
         PsiClass raced = cache.putIfAbsent(key, created);
         return raced != null ? raced : created;
+    }
+
+    /**
+     * A template bound (for example {@code StoreBase<ENTITY, …, J_STORE, …>}) is extended
+     * with the system's own arguments, as the engine binds it, so members of the alias keep their
+     * generic types instead of the raw erasure. Parameterless bindings are written as their class,
+     * other aliases as their virtual class; a bound naming a non-alias parameter stays raw.
+     */
+    private static String templateArguments(Project project, Result system, @Nullable PsiClass bound) {
+        if (bound == null || !bound.hasTypeParameters()) return "";
+        Map<String, TypeDefInfo> definitions = new HashMap<>();
+        system.typeDefs().forEach(definition -> definitions.put(definition.name(), definition));
+        List<String> arguments = new ArrayList<>();
+        for (PsiTypeParameter parameter : bound.getTypeParameters()) {
+            TypeDefInfo definition = definitions.get(parameter.getName());
+            if (definition == null) return "";
+            PsiClass binding = JavaPsiFacade.getInstance(project)
+                    .findClass(definition.boundFqn(), system.declaration().getResolveScope());
+            arguments.add(binding != null && !isVirtualClass(binding) && !binding.hasTypeParameters()
+                    ? definition.boundFqn() : system.pkg() + "." + definition.name());
+        }
+        return "<" + String.join(", ", arguments) + ">";
     }
 
     /** Finds the class's package system, then follows its superclass with identity-cycle protection. */

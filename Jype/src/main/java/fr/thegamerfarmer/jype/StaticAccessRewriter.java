@@ -164,6 +164,10 @@ final class StaticAccessRewriter extends TreeTranslator {
         tree.args = translate(tree.args);
         result = tree;
         List<String> order = owners.methodOrder(target, name, new HashSet<>());
+        if (support.specialized() && tree.typeargs.isEmpty() && !order.isEmpty()
+                && order.stream().allMatch(support.managed::contains) && !hasContext(order)) {
+            ensureStaticContext();
+        }
         if (tree.typeargs.isEmpty() && !order.isEmpty() && order.stream().allMatch(support.managed::contains)
                 && hasContext(order)) {
             tree.typeargs = com.sun.tools.javac.util.List.from(order.stream()
@@ -187,8 +191,13 @@ final class StaticAccessRewriter extends TreeTranslator {
     }
 
     private void ensureContext(Field field) {
-        if (field == null || currentMethod == null || !support.isStatic(currentMethod.mods.flags)
-                || available.containsAll(support.managed)) return;
+        if (field == null) return;
+        ensureStaticContext();
+    }
+
+    private void ensureStaticContext() {
+        if (currentMethod == null || !support.isStatic(currentMethod.mods.flags)
+                || available.containsAll(support.contextParameters())) return;
         support.extendMethod(owner, currentMethod);
         currentMethod.typarams.forEach(parameter -> available.add(parameter.name.toString()));
     }
@@ -221,12 +230,15 @@ final class StaticAccessRewriter extends TreeTranslator {
 
     private boolean hasContext(List<String> order) {
         return order.stream().allMatch(name -> available.contains(name)
+                || support.specializedContext(name, available)
                 || support.bounds.containsKey(name) && owners.typeParameters(support.bounds.get(name)).isEmpty());
     }
 
     private JCTree.JCExpression contextArgument(String name, int position) {
         support.make.at(position);
-        return available.contains(name) ? support.make.Ident(support.names.fromString(name)) : support.qualified(support.bounds.get(name));
+        if (available.contains(name)) return support.make.Ident(support.names.fromString(name));
+        if (support.specializedContext(name, available)) return support.specializedArgument(name);
+        return support.qualified(support.bounds.get(name));
     }
 
     private boolean local(String name) { return locals.stream().anyMatch(scope -> scope.containsKey(name)); }

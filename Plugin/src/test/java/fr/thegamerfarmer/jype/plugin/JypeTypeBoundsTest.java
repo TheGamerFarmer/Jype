@@ -6,18 +6,18 @@ import com.intellij.psi.*;
 /** Source import precedence and bound stability during editor changes. */
 public class JypeTypeBoundsTest extends JypeJavaFixture {
     public void testEditingTypeNameKeepsImportedBoundResolvedDuringHighlighting() {
-        myFixture.addClass("package managed.players; public class APIPlayer {}");
+        myFixture.addClass("package managed.types; public class BoundClass {}");
         PsiFile definition = myFixture.addFileToProject("managed/package-info.java", """
-                @TypeSystem({@TypeDef(name="API_PLAYER", bound=APIPlayer.class)})
+                @TypeSystem({@TypeDef(name="J_TYPE", bound=BoundClass.class)})
                 package managed;
                 import fr.thegamerfarmer.jype.annotations.TypeSystem;
                 import fr.thegamerfarmer.jype.annotations.TypeDef;
-                import managed.players.APIPlayer;
+                import managed.types.BoundClass;
                 """);
         myFixture.configureFromExistingVirtualFile(definition.getVirtualFile());
         myFixture.checkHighlighting(false, false, false);
         var document = myFixture.getEditor().getDocument();
-        for (String name : java.util.List.of("PLAYER", "API_PLAYER", "Player2")) {
+        for (String name : java.util.List.of("J_X", "J_TYPE", "Type2")) {
             WriteCommandAction.runWriteCommandAction(getProject(), () -> {
                 int start = document.getText().indexOf("name=\"") + 6;
                 int end = document.getText().indexOf('"', start);

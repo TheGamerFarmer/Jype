@@ -26,13 +26,13 @@ public class JypeTransitiveLibraryTest extends JypeJavaFixture {
         try {
             String engine = System.getProperty("jype.test.engine");
             boolean transformed = engine != null;
-            List<String> names = new ArrayList<>(List.of("PLAYER"));
+            List<String> names = new ArrayList<>(List.of("ENTITY"));
             for (int i = 0; i < 19; i++) names.add("TYPE_" + i);
             String order = String.join(", ", names);
-            String parameters = "PLAYER extends api.Player, " + String.join(", ", names.subList(1, names.size()));
+            String parameters = "ENTITY extends api.BaseNode, " + String.join(", ", names.subList(1, names.size()));
             String definitions = names.stream().map(name ->
                     "@fr.thegamerfarmer.jype.annotations.TypeDef(name=\"" + name
-                            + "\", bound=" + (name.equals("PLAYER") ? "api.Player" : "Object") + ".class)")
+                            + "\", bound=" + (name.equals("ENTITY") ? "api.BaseNode" : "Object") + ".class)")
                     .collect(Collectors.joining(", "));
             String managed = names.stream().map(name -> "\"" + name + "\"").collect(Collectors.joining(", "));
             Map<String, String> base = new LinkedHashMap<>();
@@ -72,7 +72,7 @@ public class JypeTransitiveLibraryTest extends JypeJavaFixture {
             }
             base.put("api/package-info.java",
                     "@fr.thegamerfarmer.jype.annotations.TypeSystem({" + definitions + "}) package api;");
-            base.put("api/Player.java", "package api; public class Player { public int score() { return 1; } }");
+            base.put("api/BaseNode.java", "package api; public class BaseNode { public int score() { return 1; } }");
             String fields = names.stream().map(name -> (transformed ? ""
                             : "@fr.thegamerfarmer.jype.annotations.JypeMember(sourceType=\"" + name + "\") ")
                             + "public " + name + " " + name.toLowerCase(Locale.ROOT) + ";")
@@ -81,54 +81,54 @@ public class JypeTransitiveLibraryTest extends JypeJavaFixture {
                     + (transformed ? "" : "@fr.thegamerfarmer.jype.annotations.JypeClass("
                     + "managedParameters={" + managed + "}, typeSystem=\"api\") ")
                     + "public class Service" + (transformed ? "" : "<" + parameters + ">")
-                    + " { " + fields + " public PLAYER player() { return player; } "
+                    + " { " + fields + " public ENTITY entity() { return entity; } "
                     + "public <T> T identity(T value) { return value; } "
-                    + "public void accept(PLAYER value) {} public java.util.List<PLAYER> players() { return null; } "
-                    + (transformed ? "public static PLAYER staticPlayer() { return null; }"
-                    : "@fr.thegamerfarmer.jype.annotations.JypeMember(sourceType=\"PLAYER\") public static <"
-                    + parameters + "> PLAYER staticPlayer() { return null; }")
+                    + "public void accept(ENTITY value) {} public java.util.List<ENTITY> entities() { return null; } "
+                    + (transformed ? "public static ENTITY staticEntity() { return null; }"
+                    : "@fr.thegamerfarmer.jype.annotations.JypeMember(sourceType=\"ENTITY\") public static <"
+                    + parameters + "> ENTITY staticEntity() { return null; }")
                     + " }");
             List<Path> classpath = transformed ? new ArrayList<>(List.of(Path.of(engine))) : new ArrayList<>();
             Path baseJar = compile(workspace, "base", base, classpath, transformed);
             classpath.add(baseJar);
             Map<String, String> api = Map.of(
-                    "uhc/package-info.java", """
-                            @fr.thegamerfarmer.jype.annotations.TypeSystem(inherit="api") package uhc;
+                    "lib/package-info.java", """
+                            @fr.thegamerfarmer.jype.annotations.TypeSystem(inherit="api") package lib;
                             """,
-                    "uhc/APIUHC.java", "package uhc; "
+                    "lib/LibCore.java", "package lib; "
                             + (transformed ? "" : "@fr.thegamerfarmer.jype.annotations.JypeClass("
-                            + "managedParameters={" + managed + "}, typeSystem=\"uhc\") ")
-                            + "public class APIUHC" + (transformed ? "" : "<" + parameters + ">")
+                            + "managedParameters={" + managed + "}, typeSystem=\"lib\") ")
+                            + "public class LibCore" + (transformed ? "" : "<" + parameters + ">")
                             + " extends api.Service" + (transformed ? "" : "<" + order + ">")
-                            + " { public PLAYER current() { return player(); } }");
-            Path apiJar = compile(workspace, "uhc", api, classpath, transformed);
+                            + " { public ENTITY current() { return entity(); } }");
+            Path apiJar = compile(workspace, "lib", api, classpath, transformed);
             classpath.add(apiJar);
-            String bindings = "game.BattlePlayer" + ", java.lang.Object".repeat(19);
+            String bindings = "game.ConcreteNode" + ", java.lang.Object".repeat(19);
             Map<String, String> consumer = Map.of(
                     "game/package-info.java", """
-                            @fr.thegamerfarmer.jype.annotations.TypeSystem(inherit="uhc",
+                            @fr.thegamerfarmer.jype.annotations.TypeSystem(inherit="lib",
                                 overrides=@fr.thegamerfarmer.jype.annotations.TypeDef(
-                                    name="PLAYER", bound=game.BattlePlayer.class)) package game;
+                                    name="ENTITY", bound=game.ConcreteNode.class)) package game;
                             """,
-                    "game/BattlePlayer.java", "package game; public class BattlePlayer extends api.Player {}",
-                    "game/CompiledConsumer.java", "package game; public class CompiledConsumer { uhc.APIUHC"
+                    "game/ConcreteNode.java", "package game; public class ConcreteNode extends api.BaseNode {}",
+                    "game/CompiledConsumer.java", "package game; public class CompiledConsumer { lib.LibCore"
                             + (transformed ? "" : "<" + bindings + ">")
-                            + " service; int score() { service.accept(service.player()); return service.player().score(); } }");
+                            + " service; int score() { service.accept(service.entity()); return service.entity().score(); } }");
             compile(workspace, "consumer", consumer, classpath, transformed);
             PsiTestUtil.addLibrary(getTestRootDisposable(), getModule(), "jype-base", workspace.toString(), baseJar.getFileName().toString());
-            PsiTestUtil.addLibrary(getTestRootDisposable(), getModule(), "jype-uhc", workspace.toString(), apiJar.getFileName().toString());
-            myFixture.addClass("package game; public class BattlePlayer extends api.Player {}");
+            PsiTestUtil.addLibrary(getTestRootDisposable(), getModule(), "jype-lib", workspace.toString(), apiJar.getFileName().toString());
+            myFixture.addClass("package game; public class ConcreteNode extends api.BaseNode {}");
             define("game", """
-                    inherit="uhc", overrides=@fr.thegamerfarmer.jype.annotations.TypeDef(
-                        name="PLAYER", bound=game.BattlePlayer.class)
+                    inherit="lib", overrides=@fr.thegamerfarmer.jype.annotations.TypeDef(
+                        name="ENTITY", bound=game.ConcreteNode.class)
                     """);
             PsiFile source = myFixture.addFileToProject("game/Consumer.java", """
                     package game;
                     class Consumer {
-                        uhc.APIUHC service;
-                        PLAYER player() { service.accept(service.player()); return service.player(); }
-                        java.util.List<PLAYER> players() { return service.players(); }
-                        int score() { return service.player().score(); }
+                        lib.LibCore service;
+                        ENTITY entity() { service.accept(service.entity()); return service.entity(); }
+                        java.util.List<ENTITY> entities() { return service.entities(); }
+                        int score() { return service.entity().score(); }
                     }
                     """);
             myFixture.configureFromExistingVirtualFile(source.getVirtualFile());
@@ -136,31 +136,31 @@ public class JypeTransitiveLibraryTest extends JypeJavaFixture {
             myFixture.checkHighlighting(true, false, false);
             PsiClass cls = ((PsiJavaFile) source).getClasses()[0];
             PsiClassType type = (PsiClassType) cls.getFields()[0].getType();
-            assertEquals("APIUHC", type.getPresentableText());
+            assertEquals("LibCore", type.getPresentableText());
             assertEquals(20, type.getParameters().length);
             PsiClass libraryClass = type.resolve();
             assertNotNull(JypeClassMetadata.read(libraryClass));
             String doc = DocumentationManager.getProviderFromElement(libraryClass).generateDoc(libraryClass, null);
-            assertTrue(doc, doc.contains("class APIUHC extends Service"));
+            assertTrue(doc, doc.contains("class LibCore extends Service"));
             assertFalse(doc, doc.contains("TYPE_18"));
             PsiMethodCallExpression call = PsiTreeUtil.findChildrenOfType(source, PsiMethodCallExpression.class)
-                    .stream().filter(item -> "player".equals(item.getMethodExpression().getReferenceName()))
+                    .stream().filter(item -> "entity".equals(item.getMethodExpression().getReferenceName()))
                     .findFirst().orElseThrow();
-            assertEquals("game.PLAYER", call.getType().getCanonicalText());
+            assertEquals("game.ENTITY", call.getType().getCanonicalText());
             PsiMethod method = call.resolveMethod();
             doc = DocumentationManager.getProviderFromElement(method).generateDoc(method, call);
-            assertTrue(doc, doc.contains("PLAYER player()"));
+            assertTrue(doc, doc.contains("ENTITY entity()"));
             assertFalse(doc, doc.contains("TYPE_18"));
             PsiClass baseClass = JavaPsiFacade.getInstance(getProject()).findClass("api.Service", source.getResolveScope());
             assertNotNull(baseClass);
-            PsiField playerField = baseClass.findFieldByName("player", false);
-            assertNotNull(playerField);
-            assertNotNull(JypeMemberMetadata.read(playerField));
-            assertEquals("PLAYER", JypePublicPresentation.memberType(playerField, playerField.getType()));
-            PsiMethod staticPlayer = baseClass.findMethodsByName("staticPlayer", false)[0];
-            doc = DocumentationManager.getProviderFromElement(staticPlayer).generateDoc(staticPlayer, null);
-            assertTrue(doc, doc.contains("public static PLAYER staticPlayer()"));
-            assertTrue(doc, doc.contains("psi_element://api.PLAYER"));
+            PsiField entityField = baseClass.findFieldByName("entity", false);
+            assertNotNull(entityField);
+            assertNotNull(JypeMemberMetadata.read(entityField));
+            assertEquals("ENTITY", JypePublicPresentation.memberType(entityField, entityField.getType()));
+            PsiMethod staticEntity = baseClass.findMethodsByName("staticEntity", false)[0];
+            doc = DocumentationManager.getProviderFromElement(staticEntity).generateDoc(staticEntity, null);
+            assertTrue(doc, doc.contains("public static ENTITY staticEntity()"));
+            assertTrue(doc, doc.contains("psi_element://api.ENTITY"));
             assertFalse(doc, doc.contains("TYPE_18"));
         } finally {
             myFixture.configureByText("Cleanup.java", "class Cleanup {}");

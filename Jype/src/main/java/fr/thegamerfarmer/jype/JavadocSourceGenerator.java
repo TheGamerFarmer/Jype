@@ -100,6 +100,7 @@ final class JavadocSourceGenerator {
         }
         int written = 0;
         Set<Path> destinations = new HashSet<>();
+        Map<Path, String> documents = new LinkedHashMap<>();
         for (JavaFileObject source : sourceFiles) {
             try {
                 // Runtime static lowering is deliberately absent from the documentary view.
@@ -120,39 +121,77 @@ final class JavadocSourceGenerator {
                 declarations.putAll(declarationPatches);
                 content = JavadocSourcePatcher.publicContent(content, parsed, origins, declarations,
                         name -> env.getElementUtils().getTypeElement(name) != null);
-                Files.createDirectories(destination.getParent());
-                Files.writeString(destination, content, StandardCharsets.UTF_8);
-                written++;
+                documents.put(destination, content);
             } catch (Exception exception) {
                 env.getMessager().printMessage(Diagnostic.Kind.WARNING,
                         "[Jype] Failed to write javadoc source for " + source.toUri() + ": " + exception.getMessage());
             }
-            try {
-                for (var dependency : dependencies.sources().entrySet()) {
-                    Path destination = outDir.resolve(dependency.getKey().replace('.', java.io.File.separatorChar) + ".java");
-                    if (destinations.contains(destination)) continue;
-                    Files.createDirectories(destination.getParent());
-                    Files.writeString(destination, dependency.getValue(), StandardCharsets.UTF_8);
-                }
-            } catch (Exception exception) {
-                env.getMessager().printMessage(Diagnostic.Kind.WARNING,
-                        "[Jype] Failed to write compiled documentary declarations: " + exception.getMessage());
+        }
+        try {
+            for (var dependency : dependencies.sources().entrySet()) {
+                Path destination = outDir.resolve(dependency.getKey().replace('.', java.io.File.separatorChar) + ".java");
+                if (destinations.contains(destination)) continue;
+                documents.putIfAbsent(destination, dependency.getValue());
             }
-            for (var entry : aliases.entrySet()) {
-                for (String alias : entry.getValue()) {
-                    Path destination = outDir.resolve(entry.getKey().replace('.', java.io.File.separatorChar))
+        } catch (Exception exception) {
+            env.getMessager().printMessage(Diagnostic.Kind.WARNING,
+                    "[Jype] Failed to write compiled documentary declarations: " + exception.getMessage());
+        }
+        Set<String> occupied = new HashSet<>();
+        Set<String> declaredPaths = new HashSet<>();
+        documents.keySet().forEach(path -> occupied.add(path.toString().toLowerCase(Locale.ROOT)));
+        documents.keySet().forEach(path -> declaredPaths.add(path.toString()));
+        Map<String, List<String>> aliasImports = new LinkedHashMap<>();
+        for (var entry : aliases.entrySet()) {
+            for (String alias : entry.getValue()) {
+                String packageName = entry.getKey();
+                Path destination = outDir.resolve(packageName.replace('.', java.io.File.separatorChar))
+                        .resolve(alias + ".java");
+                // Exact names remain real declarations; case-only matches need a separate alias.
+                boolean existingDeclaration = declaredPaths.contains(destination.toString())
+                        || sourceOrigins.containsKey(packageName + "." + alias)
+                        || declarationPatches.containsKey(packageName + "." + alias);
+                if (existingDeclaration) continue;
+                if (!occupied.add(destination.toString().toLowerCase(Locale.ROOT))) {
+                    String aliasPackage = packageName + ".jype_alias_"
+                            + HexFormat.of().formatHex(alias.getBytes(StandardCharsets.UTF_8));
+                    destination = outDir.resolve(aliasPackage.replace('.', java.io.File.separatorChar))
                             .resolve(alias + ".java");
-                    if (destinations.contains(destination)) continue;
-                    try {
-                        Files.createDirectories(destination.getParent());
-                        Files.writeString(destination, "package " + entry.getKey() + ";\n"
-                                + "/** Documentary Jype alias " + alias + "; not a runtime class. */\n"
-                                + "public interface " + alias + " {}\n", StandardCharsets.UTF_8);
-                    } catch (Exception exception) {
-                        env.getMessager().printMessage(Diagnostic.Kind.WARNING,
-                                "[Jype] Failed to write documentary alias " + alias + ": " + exception.getMessage());
+                    while (!occupied.add(destination.toString().toLowerCase(Locale.ROOT))) {
+                        aliasPackage += "_";
+                        destination = outDir.resolve(aliasPackage.replace('.', java.io.File.separatorChar))
+                                .resolve(alias + ".java");
+                    }
+                    aliasImports.computeIfAbsent(packageName, ignored -> new ArrayList<>())
+                            .add(aliasPackage + "." + alias);
+                    packageName = aliasPackage;
+                }
+                documents.put(destination, "package " + packageName + ";\n"
+                        + "/** Documentary Jype alias " + alias + "; not a runtime class. */\n"
+                        + "public interface " + alias + " {}\n");
+            }
+        }
+        for (var document : documents.entrySet()) {
+            try {
+                String content = document.getValue();
+                if (!aliasImports.isEmpty()) {
+                    var parsed = JavadocSourcePatcher.parse(content);
+                    String packageName = parsed.unit().getPackageName() == null ? ""
+                            : parsed.unit().getPackageName().toString();
+                    List<String> imports = aliasImports.getOrDefault(packageName, List.of());
+                    if (!imports.isEmpty()) {
+                        int end = (int) parsed.positions().getEndPosition(parsed.unit(), parsed.unit().getPackage());
+                        String declarations = "\n" + String.join("\n",
+                                imports.stream().map(name -> "import " + name + ";").toList()) + "\n";
+                        content = content.substring(0, end) + declarations + content.substring(end);
                     }
                 }
+                Files.createDirectories(document.getKey().getParent());
+                Files.writeString(document.getKey(), content, StandardCharsets.UTF_8);
+                if (destinations.contains(document.getKey())) written++;
+            } catch (Exception exception) {
+                env.getMessager().printMessage(Diagnostic.Kind.WARNING,
+                        "[Jype] Failed to write documentary source " + document.getKey() + ": " + exception.getMessage());
             }
         }
         JypeDiagnostics.debug(env,

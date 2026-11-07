@@ -23,7 +23,7 @@ final class BoundTypeCompletion {
      *
      * <p>After {@link ManagedParameterPropagation} injects the required Jype
      * parameters into the class, this method replaces each bound {@code Foo<T>}
-     * (with too few arguments) with {@code Foo<T, API_PLAYER, …>} by filling the
+     * (with too few arguments) with {@code Foo<T, J_A, …>} by filling the
      * missing positions from {@code ownParams}.
      */
     void fixTypeParamBounds(JCTree.JCCompilationUnit cu,
@@ -92,8 +92,8 @@ final class BoundTypeCompletion {
      * Post-processing pass: expands nested JCTypeApply nodes that have too few
      * arguments in {@code extends} clauses and type-parameter bounds.
      *
-     * <p>Example: {@code SubPower<?>} → {@code SubPower<?,?,?,?,?,?,?>} when
-     * SubPower has 7 parameters after injection and all missing positions are
+     * <p>Example: {@code AbstractSecondary<?>} → {@code AbstractSecondary<?,?,?,?,?,?,?>} when
+     * AbstractSecondary has 7 parameters after injection and all missing positions are
      * managed names.
      */
     void expandAllNestedWildcards(List<JCTree.JCCompilationUnit> cus,

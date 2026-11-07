@@ -15,11 +15,11 @@ import java.util.List;
 /** Parameter info snapshots are prepared during resolution and rendered without resolving on the EDT. */
 public class JypeParameterInfoTest extends JypeJavaFixture {
     public void testFindShowUpdateAndRender() {
-        objectSystem("api", "PLAYER");
+        objectSystem("api", "ENTITY");
         myFixture.addClass("""
                 package api;
-                public class Service<PLAYER> {
-                    public void accept(PLAYER value, int count) {}
+                public class Service<ENTITY> {
+                    public void accept(ENTITY value, int count) {}
                 }
                 """);
         PsiFile file = myFixture.configureByText("Consumer.java", """
@@ -37,7 +37,7 @@ public class JypeParameterInfoTest extends JypeJavaFixture {
         handler.updateParameterInfo(owner, context);
         assertEquals(1, context.current);
         handler.updateUI((JypeParameterInfoHandler.Candidate) context.items[0], context);
-        assertEquals("PLAYER value, int count", context.text);
+        assertEquals("ENTITY value, int count", context.text);
         assertEquals(14, context.start);
         assertEquals(context.text.length(), context.end);
         context.owner = null;
@@ -50,7 +50,7 @@ public class JypeParameterInfoTest extends JypeJavaFixture {
 
     public void testVarargsDeprecationAndOutOfRangePresentation() {
         PsiMethod method = myFixture.addClass("class Methods { void method() {} }").getMethods()[0];
-        var candidate = new JypeParameterInfoHandler.Candidate(method, List.of("PLAYER... players"), true, true);
+        var candidate = new JypeParameterInfoHandler.Candidate(method, List.of("ENTITY... entities"), true, true);
         Context context = new Context(method.getContainingFile(), myFixture.getEditor(), 0);
         context.current = 5;
         context.enabled = false;
@@ -70,15 +70,15 @@ public class JypeParameterInfoTest extends JypeJavaFixture {
     }
 
     public void testConstructorAndOrdinaryCallsAndIndexing() {
-        objectSystem("api", "PLAYER");
-        myFixture.addClass("package api; public class Service<PLAYER> { public Service(PLAYER value) {} }");
+        objectSystem("api", "ENTITY");
+        myFixture.addClass("package api; public class Service<ENTITY> { public Service(ENTITY value) {} }");
         PsiFile file = myFixture.configureByText("Consumer.java",
                 "package api; class Consumer { Object value = new Service(<caret>null); }");
         Context context = new Context(file, myFixture.getEditor(), myFixture.getCaretOffset());
         var handler = new JypeParameterInfoHandler();
         assertNotNull(handler.findElementForParameterInfo(context));
         assertEquals(1, context.items.length);
-        assertEquals(List.of("PLAYER value"), ((JypeParameterInfoHandler.Candidate) context.items[0]).parameters());
+        assertEquals(List.of("ENTITY value"), ((JypeParameterInfoHandler.Candidate) context.items[0]).parameters());
         DumbModeTestUtils.runInDumbModeSynchronously(getProject(),
                 () -> assertNull(handler.findElementForParameterInfo(context)));
         file = myFixture.configureByText("Ordinary.java", "class Ordinary { void method() { System.out.println(<caret>); } }");

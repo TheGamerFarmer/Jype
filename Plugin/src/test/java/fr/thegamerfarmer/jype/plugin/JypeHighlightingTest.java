@@ -13,42 +13,42 @@ public class JypeHighlightingTest extends JypeJavaFixture {
         define("managed",
                 """
                 {
-                    @fr.thegamerfarmer.jype.annotations.TypeDef(name="API_ROLE", bound=managed.roles.Role.class),
-                    @fr.thegamerfarmer.jype.annotations.TypeDef(name="API_CAMP", bound=managed.camps.Camp.class)
+                    @fr.thegamerfarmer.jype.annotations.TypeDef(name="J_B", bound=managed.types.Leaf.class),
+                    @fr.thegamerfarmer.jype.annotations.TypeDef(name="J_C", bound=managed.containers.Container.class)
                 }
                 """);
-        myFixture.addFileToProject("managed/roles/Role.java", """
-                package managed.roles;
-                public class Role {
-                    public API_ROLE newInstance() { return null; }
-                    public API_CAMP getCamp() { return null; }
+        myFixture.addFileToProject("managed/types/Leaf.java", """
+                package managed.types;
+                public class Leaf {
+                    public J_B newInstance() { return null; }
+                    public J_C getContainer() { return null; }
                 }
                 """);
-        myFixture.addFileToProject("managed/camps/Camp.java", """
-                package managed.camps;
-                public class Camp {
-                    private final java.util.List<API_ROLE> rolesInCampsActive = new java.util.ArrayList<>();
-                    public java.util.List<API_ROLE> getRolesInCampsActive() { return rolesInCampsActive; }
+        myFixture.addFileToProject("managed/containers/Container.java", """
+                package managed.containers;
+                public class Container {
+                    private final java.util.List<J_B> itemsInContainerActive = new java.util.ArrayList<>();
+                    public java.util.List<J_B> getItemsInContainerActive() { return itemsInContainerActive; }
                 }
                 """);
-        myFixture.addFileToProject("managed/utils/APIClass.java", """
+        myFixture.addFileToProject("managed/utils/AbstractHub.java", """
                 package managed.utils;
-                public class APIClass {
-                    protected java.util.Map<String, API_ROLE> roles;
-                    protected java.util.List<API_ROLE> rolesActive;
+                public class AbstractHub {
+                    protected java.util.Map<String, J_B> items;
+                    protected java.util.List<J_B> activeItems;
                 }
                 """);
-        myFixture.addFileToProject("managed/commands/CommandInterface.java",
-                "package managed.commands; public class CommandInterface extends managed.utils.APIClass {}");
+        myFixture.addFileToProject("managed/commands/CommandBase.java",
+                "package managed.commands; public class CommandBase extends managed.utils.AbstractHub {}");
         PsiFile start = myFixture.addFileToProject("managed/commands/Start.java", """
                 package managed.commands;
-                class Start extends CommandInterface {
+                class Start extends CommandBase {
                     void run() {
-                        java.util.List<API_ROLE> roles = new java.util.ArrayList<>(this.roles.values());
-                        API_ROLE role = roles.get(0);
-                        API_ROLE roleClone = role.newInstance();
-                        role.getCamp().getRolesInCampsActive().add(roleClone);
-                        rolesActive.add(roleClone);
+                        java.util.List<J_B> items = new java.util.ArrayList<>(this.items.values());
+                        J_B item = items.get(0);
+                        J_B itemClone = item.newInstance();
+                        item.getContainer().getItemsInContainerActive().add(itemClone);
+                        activeItems.add(itemClone);
                     }
                 }
                 """);
@@ -66,34 +66,34 @@ public class JypeHighlightingTest extends JypeJavaFixture {
     }
 
     public void testRealCollectionQueryWithoutUpdateIsStillReported() {
-        objectSystem("managed", "API_ROLE");
+        objectSystem("managed", "J_B");
         myFixture.configureByText("Consumer.java", """
                 package managed;
                 class Consumer {
                     int count() {
-                        java.util.List<API_ROLE> roles = new java.util.ArrayList<>();
-                        return roles.size();
+                        java.util.List<J_B> items = new java.util.ArrayList<>();
+                        return items.size();
                     }
                 }
                 """);
         myFixture.enableInspections(new com.siyeh.ig.bugs.MismatchedCollectionQueryUpdateInspection());
         assertTrue(myFixture.doHighlighting(HighlightSeverity.WARNING).stream()
-                .anyMatch(info -> "Contents of collection 'roles' are queried, but never updated"
+                .anyMatch(info -> "Contents of collection 'items' are queried, but never updated"
                         .equals(info.getDescription())));
     }
 
     public void testRealErrorsMentioningManagedTypesAreNotHidden() {
-        objectSystem("managed", "API_PLAYER");
+        objectSystem("managed", "J_A");
         PsiFile file = myFixture.configureByText("Consumer.java", """
                 package managed;
-                class Consumer { API_PLAYER player; void test() { player.nonexistent(); } }
+                class Consumer { J_A item; void test() { item.nonexistent(); } }
                 """);
         JypeHighlightFilter filter = new JypeHighlightFilter();
         for (String message : Arrays.asList(
-                "Cannot resolve method 'nonexistent' in 'API_PLAYER'",
-                "Incompatible types: java.lang.String cannot be converted to managed.API_PLAYER",
-                "Dereference of 'player' will produce 'NullPointerException'",
-                "Condition 'player == null' is always 'true'")) {
+                "Cannot resolve method 'nonexistent' in 'J_A'",
+                "Incompatible types: java.lang.String cannot be converted to managed.J_A",
+                "Dereference of 'item' will produce 'NullPointerException'",
+                "Condition 'item == null' is always 'true'")) {
             HighlightInfo info = HighlightInfo.newHighlightInfo(HighlightInfoType.ERROR)
                     .range(file.getText().indexOf("nonexistent"), file.getText().indexOf("nonexistent") + 11)
                     .description(message).severity(HighlightSeverity.ERROR).create();
@@ -103,14 +103,14 @@ public class JypeHighlightingTest extends JypeJavaFixture {
     }
 
     public void testActualHighlightingResolvesBoundMembersWithoutHidingWrongCalls() {
-        myFixture.addClass("package bounds; public class Player { public int strength() { return 1; } }");
-        define("managed", "{@fr.thegamerfarmer.jype.annotations.TypeDef(name=\"Player2\", bound=bounds.Player.class)}");
+        myFixture.addClass("package bounds; public class BoundType { public int score() { return 1; } }");
+        define("managed", "{@fr.thegamerfarmer.jype.annotations.TypeDef(name=\"J_TWO\", bound=bounds.BoundType.class)}");
         myFixture.configureByText("Consumer.java", """
                 package managed;
                 class Consumer {
-                    Player2 player;
-                    int strength() { return player.strength(); }
-                    void wrong() { player.<error descr="Cannot resolve method 'missing' in 'Player2'">missing</error>(); }
+                    J_TWO item;
+                    int score() { return item.score(); }
+                    void wrong() { item.<error descr="Cannot resolve method 'missing' in 'J_TWO'">missing</error>(); }
                 }
                 """);
         myFixture.checkHighlighting(false, false, false);

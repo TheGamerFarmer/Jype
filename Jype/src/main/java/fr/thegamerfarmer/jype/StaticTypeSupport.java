@@ -38,6 +38,9 @@ final class StaticTypeSupport {
     final BiFunction<JCTree.JCCompilationUnit, JCTree.JCExpression, String> resolve;
     final Set<JCTree.JCMethodDecl> accessors = Collections.newSetFromMap(new IdentityHashMap<>());
     private final Map<String, List<JavadocSourceGenerator.SourceEdit>> sourceEdits;
+    private List<String> residual = List.of();
+    private Map<String, String> concrete = Map.of();
+    private Function<String, JCTree.JCExpression> concreteExpression = name -> null;
 
     /** Retains task-local factories, package bounds, canonical source orders and edit destinations. */
     StaticTypeSupport(TreeMaker make, Names names, Log log, Set<String> managed,
@@ -192,6 +195,31 @@ final class StaticTypeSupport {
 
     void origins(DeclarationOrigins sourceOrigins) { origins = sourceOrigins; }
 
+    /**
+     * In a specialized inherited system, static contexts only abstract over the residual aliases;
+     * every other alias is its local binding, applied to those residual parameters.
+     */
+    void specialize(List<String> residual, Map<String, String> concrete,
+                    Function<String, JCTree.JCExpression> concreteExpression) {
+        this.residual = List.copyOf(residual);
+        this.concrete = Map.copyOf(concrete);
+        this.concreteExpression = concreteExpression;
+    }
+
+    /** Aliases a static member must own to call managed views. */
+    Collection<String> contextParameters() { return residual.isEmpty() ? managed : residual; }
+
+    boolean specialized() { return !residual.isEmpty(); }
+
+    /** Whether {@code alias} can be expressed by its specialized binding with the given lexical parameters. */
+    boolean specializedContext(String alias, Set<String> available) {
+        return !residual.isEmpty() && concrete.containsKey(alias) && available.containsAll(residual);
+    }
+
+    JCTree.JCExpression specializedArgument(String alias) {
+        return concreteExpression.apply(concrete.get(alias));
+    }
+
     /** Adds method-owned parameters and records source insertions, preserving explicit ordinary ones. */
     void extendMethod(Owner owner, JCTree.JCMethodDecl method) {
         var original = method.typarams;
@@ -216,7 +244,7 @@ final class StaticTypeSupport {
         var result = existing;
         Set<String> declared = new HashSet<>();
         existing.forEach(parameter -> declared.add(parameter.name.toString()));
-        for (String name : managed) {
+        for (String name : contextParameters()) {
             if (declared.contains(name)) continue;
             String bound = bounds.get(name);
             if (bound == null) {
@@ -228,9 +256,15 @@ final class StaticTypeSupport {
             if (!boundParameters.isEmpty()) {
                 var args = new ArrayList<JCTree.JCExpression>();
                 for (String parameter : boundParameters) {
-                    args.add(managed.contains(parameter) ? make.Ident(names.fromString(parameter))
+                    if (!residual.isEmpty() && !residual.contains(parameter) && concrete.containsKey(parameter)) {
+                        args.add(specializedArgument(parameter));
+                        continue;
+                    }
+                    make.at(position);
+                    args.add(contextParameters().contains(parameter) ? make.Ident(names.fromString(parameter))
                             : make.Wildcard(make.TypeBoundKind(com.sun.tools.javac.code.BoundKind.UNBOUND), null));
                 }
+                make.at(position);
                 type = make.TypeApply(type, com.sun.tools.javac.util.List.from(args));
             }
             result = result.append(make.TypeParameter(names.fromString(name), com.sun.tools.javac.util.List.of(type)));
@@ -253,6 +287,13 @@ final class StaticTypeSupport {
     private JCTree.JCExpression complete(JCTree.JCCompilationUnit unit, JCTree.JCExpression type,
                                        boolean compiledOnly) {
         return new TreeTranslator() {
+            private JCTree.JCExpression argument(String parameter, int position) {
+                if (!residual.isEmpty() && !residual.contains(parameter) && concrete.containsKey(parameter)) {
+                    make.at(position);
+                    return specializedArgument(parameter);
+                }
+                return make.at(position).Ident(names.fromString(parameter));
+            }
             private JCTree.JCExpression raw(JCTree.JCExpression tree) {
                 String target = resolve.apply(unit, tree);
                 if (target == null) return tree;
@@ -261,7 +302,7 @@ final class StaticTypeSupport {
                 Set<String> technical = owners.managedParameters(target);
                 if (params.isEmpty() || !technical.containsAll(params)) return tree;
                 return make.at(tree.pos).TypeApply(tree, com.sun.tools.javac.util.List.from(params.stream()
-                        .map(parameter -> (JCTree.JCExpression) make.at(tree.pos).Ident(names.fromString(parameter))).toList()));
+                        .map(parameter -> argument(parameter, tree.pos)).toList()));
             }
             @Override public void visitIdent(JCTree.JCIdent tree) { result = raw(tree); }
             @Override public void visitSelect(JCTree.JCFieldAccess tree) { result = raw(tree); }
@@ -278,7 +319,7 @@ final class StaticTypeSupport {
                 var supplied = tree.arguments.iterator();
                 var args = new ArrayList<JCTree.JCExpression>();
                 for (String param : params) {
-                    args.add(technical.contains(param) ? make.at(tree.pos).Ident(names.fromString(param)) : supplied.next());
+                    args.add(technical.contains(param) ? argument(param, tree.pos) : supplied.next());
                 }
                 tree.arguments = com.sun.tools.javac.util.List.from(args);
             }

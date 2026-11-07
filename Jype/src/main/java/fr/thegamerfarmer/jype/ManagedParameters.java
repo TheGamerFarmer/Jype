@@ -21,7 +21,7 @@ final class ManagedParameters {
      * during annotation processing, after Enter creates the TypeVar symbols.
      *
      * <p>Applies to abstract AND concrete classes: a concrete class such as
-     * {@code ScoreboardManager} that uses {@code API_PLAYER} in its fields needs
+     * {@code ConcreteRegistry} that uses {@code J_A} in its fields needs
      * the parameters just as much as an abstract class.
      *
      * <p>Rule: if one managed name is used in the body, all managed names are

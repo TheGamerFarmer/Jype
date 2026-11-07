@@ -16,6 +16,8 @@ import static fr.thegamerfarmer.jype.TypeArgumentCompletion.*;
 final class InheritanceCompletion {
     private final SourceHierarchy hierarchy;
     private final BoundTypeCompletion bounds;
+    private List<String> residual = List.of();
+    private Set<String> specializedBindings = Set.of();
 
     /** Couples declaration completion to the same canonical index and bound-completion pass. */
     InheritanceCompletion(SourceHierarchy hierarchy, BoundTypeCompletion bounds) {
@@ -23,11 +25,78 @@ final class InheritanceCompletion {
         this.bounds = bounds;
     }
 
+    /**
+     * Selects the inherited generic aliases that remain class parameters of a specialized
+     * system, and the source bindings that are applied to them.
+     */
+    void residual(List<String> residual, Set<String> specializedBindings) {
+        this.residual = List.copyOf(residual);
+        this.specializedBindings = Set.copyOf(specializedBindings);
+    }
+
+    /** A concrete binding, applied to the residual aliases when it owns them. */
+    JCTree.JCExpression concreteExpression(String fqn, TreeMaker make, Names names) {
+        JCTree.JCExpression type = buildQualifiedName(fqn, make, names);
+        if (residual.isEmpty() || !specializedBindings.contains(fqn)) return type;
+        List<JCTree.JCExpression> arguments = new ArrayList<>();
+        for (String parameter : residual) arguments.add(make.Ident(names.fromString(parameter)));
+        return make.TypeApply(type, com.sun.tools.javac.util.List.from(arguments));
+    }
+
+    /** Residual aliases stay lexical; every other managed position uses its specialized binding. */
+    private List<JCTree.JCExpression> specializedPartialArguments(JCTree.JCCompilationUnit cu,
+            JCTree.JCClassDecl cls, Map<String, List<String>> index, List<String> parameters,
+            com.sun.tools.javac.util.List<JCTree.JCExpression> provided, Set<String> own,
+            Set<String> managed, Map<String, String> concrete, TreeMaker make, Names names) {
+        long ordinary = parameters.stream().filter(parameter -> !managed.contains(parameter)).count();
+        if (ordinary != provided.size()) return null;
+        boolean needsResidual = false;
+        for (String parameter : parameters) {
+            if (!managed.contains(parameter) || own.contains(parameter)) continue;
+            if (residual.contains(parameter)) needsResidual = true;
+            else if (!concrete.containsKey(parameter)) return null;
+            else if (specializedBindings.contains(concrete.get(parameter))) needsResidual = true;
+        }
+        if (needsResidual) {
+            for (String parameter : residual) {
+                if (own.add(parameter)) {
+                    cls.typarams = cls.typarams.append(makeTypeParam(parameter, cls.pos, make, names));
+                }
+            }
+            hierarchy.updateTypeParamMap(index, cu, cls,
+                    cls.typarams.stream().map(parameter -> parameter.name.toString()).toList());
+        }
+        var supplied = provided.iterator();
+        List<JCTree.JCExpression> arguments = new ArrayList<>();
+        for (String parameter : parameters) {
+            if (!managed.contains(parameter)) arguments.add(supplied.next());
+            else if (own.contains(parameter)) arguments.add(make.Ident(names.fromString(parameter)));
+            else arguments.add(concreteExpression(concrete.get(parameter), make, names));
+        }
+        return arguments;
+    }
+
+    /** Residual aliases stay lexical; every other managed position uses its specialized binding. */
+    private List<JCTree.JCExpression> residualArguments(List<String> parameters, Set<String> own,
+            Set<String> managed, Map<String, String> concrete, TreeMaker make, Names names) {
+        if (residual.isEmpty() || !own.containsAll(residual)) return null;
+        List<JCTree.JCExpression> arguments = new ArrayList<>();
+        for (String parameter : parameters) {
+            if (own.contains(parameter)) arguments.add(make.Ident(names.fromString(parameter)));
+            else if (managed.contains(parameter) && concrete.containsKey(parameter)) {
+                arguments.add(concreteExpression(concrete.get(parameter), make, names));
+            } else return null;
+        }
+        return arguments;
+    }
+
     /** Completes inheritance first, then signatures/bounds using any parameters just injected. */
     void fixClassDecl(JCTree.JCCompilationUnit cu, JCTree.JCClassDecl cls,
             Map<String, List<String>> typeParamMap, Set<String> managedNames,
-            Map<String, String> concreteTypeMap, Set<String> concreteBindings, TreeMaker make, Names names) {
-        completeSuperclass(cu, cls, typeParamMap, managedNames, concreteTypeMap, concreteBindings, make, names);
+            Map<String, String> concreteTypeMap, Set<String> concreteBindings,
+            boolean specializedInheritedSystem, TreeMaker make, Names names) {
+        completeSuperclass(cu, cls, typeParamMap, managedNames, concreteTypeMap, concreteBindings,
+                specializedInheritedSystem, make, names);
         completeInterfaces(cu, cls, typeParamMap, managedNames, concreteTypeMap, make, names);
         completeRawMethodParameters(cu, cls, typeParamMap, managedNames, concreteTypeMap, make, names);
         if (!managedNames.isEmpty()) {
@@ -37,7 +106,8 @@ final class InheritanceCompletion {
         }
         for (JCTree member : cls.defs) {
             if (member instanceof JCTree.JCClassDecl inner) {
-                fixClassDecl(cu, inner, typeParamMap, managedNames, concreteTypeMap, concreteBindings, make, names);
+                fixClassDecl(cu, inner, typeParamMap, managedNames, concreteTypeMap, concreteBindings,
+                        specializedInheritedSystem, make, names);
             }
         }
     }
@@ -48,6 +118,7 @@ final class InheritanceCompletion {
                                Set<String> managedNames,
                                Map<String, String> concreteTypeMap,
                                Set<String> concreteBindings,
+                               boolean specializedInheritedSystem,
                                TreeMaker make, Names names) {
         Set<String> ownParams = new HashSet<>();
         for (JCTree.JCTypeParameter tp : cls.typarams) {
@@ -55,20 +126,25 @@ final class InheritanceCompletion {
         }
 
         if (cls.extending instanceof JCTree.JCTypeApply existing) {
-            completePartialSuperclass(cu, cls, existing, typeParamMap, ownParams, managedNames, make, names);
+            completePartialSuperclass(cu, cls, existing, typeParamMap, ownParams, managedNames,
+                    concreteTypeMap, make, names);
         } else if (cls.extending != null && !managedNames.isEmpty()) {
             completeRawSuperclass(cu, cls, typeParamMap, ownParams, managedNames, concreteTypeMap,
-                    concreteBindings, make, names);
+                    concreteBindings, specializedInheritedSystem, make, names);
         }
     }
 
     private void completePartialSuperclass(JCTree.JCCompilationUnit cu, JCTree.JCClassDecl cls,
             JCTree.JCTypeApply existing, Map<String, List<String>> index, Set<String> own,
-            Set<String> managed, TreeMaker make, Names names) {
+            Set<String> managed, Map<String, String> concrete, TreeMaker make, Names names) {
         if (getSimpleName(existing.clazz) == null) return;
         List<String> parameters = hierarchy.resolveTypeParams(index, cu, existing.clazz);
         if (parameters == null || existing.arguments.size() >= parameters.size()) return;
         List<JCTree.JCExpression> arguments = buildFixedArgs(parameters, existing.arguments, own, make, names);
+        if (arguments == null && !residual.isEmpty()) {
+            arguments = specializedPartialArguments(cu, cls, index, parameters, existing.arguments,
+                    own, managed, concrete, make, names);
+        }
         if (arguments == null) {
             List<String> injected = tryInjectManagedParams(
                     cls, parameters, existing.arguments, own, managed, make, names);
@@ -92,18 +168,28 @@ final class InheritanceCompletion {
 
     private void completeRawSuperclass(JCTree.JCCompilationUnit cu, JCTree.JCClassDecl cls,
             Map<String, List<String>> index, Set<String> own, Set<String> managed,
-            Map<String, String> concrete, Set<String> bindings, TreeMaker make, Names names) {
+            Map<String, String> concrete, Set<String> bindings, boolean specializedInheritedSystem,
+            TreeMaker make, Names names) {
         if (getSimpleName(cls.extending) == null) return;
         List<String> parameters = hierarchy.resolveTypeParams(index, cu, cls.extending);
         if (parameters == null || parameters.isEmpty()) return;
         boolean abstractClass = (cls.mods.flags & Flags.ABSTRACT) != 0;
         boolean binding = bindings.contains(hierarchy.classNames.get(cls));
         boolean allManaged = managed.containsAll(parameters);
+        boolean specializeAbstract = !residual.isEmpty();
         List<JCTree.JCExpression> arguments = null;
-        if (abstractClass && !binding && allManaged && Collections.disjoint(own, managed)) {
+        if (abstractClass && !binding && allManaged && Collections.disjoint(own, managed) && !specializeAbstract) {
             arguments = genericSuperclassArguments(cu, cls, index, own, parameters, make, names);
         }
         if (arguments == null) arguments = buildConcreteArgs(parameters, own, managed, concrete, make, names);
+        if (arguments == null && binding && allManaged) {
+            arguments = residualArguments(parameters, own, managed, concrete, make, names);
+        }
+        if (arguments == null && (!abstractClass || specializeAbstract) && !binding && allManaged
+                && specializedInheritedSystem) {
+            arguments = partialConcreteSuperclassArguments(
+                    cu, cls, index, own, parameters, managed, concrete, make, names);
+        }
         // A non-binding leaf without concrete associations remains a generic template.
         // Injecting raw F-bounded classes here would violate their recursive constraints.
         if (arguments == null && !abstractClass && !binding && allManaged) {
@@ -113,6 +199,29 @@ final class InheritanceCompletion {
             make.at(cls.extending.pos);
             cls.extending = make.TypeApply(cls.extending, com.sun.tools.javac.util.List.from(arguments));
         }
+    }
+
+    private List<JCTree.JCExpression> partialConcreteSuperclassArguments(JCTree.JCCompilationUnit cu,
+            JCTree.JCClassDecl cls, Map<String, List<String>> index, Set<String> own,
+            List<String> parameters, Set<String> managed, Map<String, String> concrete,
+            TreeMaker make, Names names) {
+        List<JCTree.JCExpression> arguments = new ArrayList<>();
+        for (String parameter : parameters) {
+            if (own.contains(parameter)) {
+                arguments.add(make.Ident(names.fromString(parameter)));
+            } else if (managed.contains(parameter) && concrete.containsKey(parameter)) {
+                arguments.add(concreteExpression(concrete.get(parameter), make, names));
+            } else if (managed.contains(parameter)) {
+                cls.typarams = cls.typarams.append(makeTypeParam(parameter, cls.pos, make, names));
+                own.add(parameter);
+                arguments.add(make.Ident(names.fromString(parameter)));
+            } else {
+                return null;
+            }
+        }
+        hierarchy.updateTypeParamMap(index, cu, cls,
+                cls.typarams.stream().map(parameter -> parameter.name.toString()).toList());
+        return arguments;
     }
 
     private List<JCTree.JCExpression> genericSuperclassArguments(JCTree.JCCompilationUnit cu,
@@ -135,8 +244,8 @@ final class InheritanceCompletion {
             Map<String, List<String>> typeParamMap, Set<String> managedNames,
             Map<String, String> concreteTypeMap, TreeMaker make, Names names) {
         // Complete raw implements clauses (same logic as for raw extends clauses).
-        // E.g. VanillaSound implements APISound (raw) → APISound has Jype parameters →
-        // Jype injects APISound<API_PLAYER,...> if all parameters are in ownParams,
+        // E.g. ConcreteImpl implements AbstractContract (raw) → AbstractContract has Jype parameters →
+        // Jype injects AbstractContract<J_A,...> if all parameters are in ownParams,
         // or uses buildConcreteArgs if concrete types are available.
         if (cls.implementing != null && !cls.implementing.isEmpty()) {
             Set<String> currentOwn = new HashSet<>();
@@ -185,6 +294,9 @@ final class InheritanceCompletion {
                     ifaceArgs = buildConcreteArgs(
                             ifaceParams, currentOwn, managedNames, concreteTypeMap, make, names);
                 }
+                if (ifaceArgs == null && managedNames.containsAll(ifaceParams)) {
+                    ifaceArgs = residualArguments(ifaceParams, currentOwn, managedNames, concreteTypeMap, make, names);
+                }
                 if (ifaceArgs != null) {
                     make.at(iface.pos);
                     newImpl.add(make.TypeApply(iface, com.sun.tools.javac.util.List.from(ifaceArgs)));
@@ -204,12 +316,12 @@ final class InheritanceCompletion {
             Map<String, List<String>> typeParamMap, Set<String> managedNames,
             Map<String, String> concreteTypeMap, TreeMaker make, Names names) {
         // Complete raw types in method parameters.
-        // Example: setVictimeKilled(PlayerDeathEventInfo infos)
-        //           → setVictimeKilled(PlayerDeathEventInfo<API_PLAYER,...> infos)
-        // Needed when a generic static inner class (e.g. PlayerDeathEventInfo)
+        // Example: processEvent(EventWrapper infos)
+        //           → processEvent(EventWrapper<J_A,...> infos)
+        // Needed when a generic static inner class (e.g. EventWrapper)
         // declares managed-type fields and is used raw as a method parameter in
-        // the outer class: without this fix, infos.getVictime() returns Object (erasure).
-        // → "Object cannot be converted to API_PLAYER".
+        // the outer class: without this fix, infos.get() returns Object (erasure).
+        // → "Object cannot be converted to J_A".
         if (!managedNames.isEmpty()) {
             Set<String> currentOwnForParams = new HashSet<>();
             for (JCTree.JCTypeParameter tp : cls.typarams) currentOwnForParams.add(tp.name.toString());
@@ -237,6 +349,10 @@ final class InheritanceCompletion {
                         if (paramArgs == null) {
                             paramArgs = buildConcreteArgs(
                                     paramTypeParams, currentOwnForParams, managedNames,
+                                    concreteTypeMap, make, names);
+                        }
+                        if (paramArgs == null && managedNames.containsAll(paramTypeParams)) {
+                            paramArgs = residualArguments(paramTypeParams, currentOwnForParams, managedNames,
                                     concreteTypeMap, make, names);
                         }
                         if (paramArgs != null) {

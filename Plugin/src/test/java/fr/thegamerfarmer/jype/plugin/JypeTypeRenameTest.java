@@ -21,10 +21,10 @@ public class JypeTypeRenameTest extends JypeJavaFixture {
             assertEquals("Search " + i + " must retain both usages in each file and the declaration",
                     129, references.size());
         }
-        new com.intellij.refactoring.rename.RenameProcessor(getProject(), type, "PLAYER", false, false).run();
+        new com.intellij.refactoring.rename.RenameProcessor(getProject(), type, "MARK", false, false).run();
         for (PsiFile file : files) {
-            assertTrue(file.getText(), file.getText().contains("PLAYER value;"));
-            assertTrue(file.getText(), file.getText().contains("java.util.List<managed.PLAYER>"));
+            assertTrue(file.getText(), file.getText().contains("MARK value;"));
+            assertTrue(file.getText(), file.getText().contains("java.util.List<managed.MARK>"));
         }
     }
 
@@ -45,15 +45,15 @@ public class JypeTypeRenameTest extends JypeJavaFixture {
                 """);
         myFixture.configureFromExistingVirtualFile(consumer.getVirtualFile());
         myFixture.getEditor().getCaretModel().moveToOffset(consumer.getText().indexOf("TYPE value") + 1);
-        myFixture.renameElementAtCaretUsingHandler("PLAYER");
-        assertTrue(definition.getText(), definition.getText().replaceAll("\\s+", "").contains("name=\"PLAYER\""));
-        assertTrue(consumer.getText(), consumer.getText().contains("PLAYER value;"));
-        assertTrue(consumer.getText(), consumer.getText().contains("java.util.List<managed.PLAYER>"));
+        myFixture.renameElementAtCaretUsingHandler("MARK");
+        assertTrue(definition.getText(), definition.getText().replaceAll("\\s+", "").contains("name=\"MARK\""));
+        assertTrue(consumer.getText(), consumer.getText().contains("MARK value;"));
+        assertTrue(consumer.getText(), consumer.getText().contains("java.util.List<managed.MARK>"));
         assertTrue(consumer.getText(), consumer.getText().contains("<TYPE> TYPE identity(TYPE value)"));
         assertTrue(consumer.getText(), consumer.getText().contains("\"TYPE\""));
         assertTrue(other.getText(), other.getText().contains("TYPE value;"));
         assertNull(new JypePsiElementFinder(getProject()).findClass("managed.TYPE", scope()));
-        assertNotNull(new JypePsiElementFinder(getProject()).findClass("managed.PLAYER", scope()));
+        assertNotNull(new JypePsiElementFinder(getProject()).findClass("managed.MARK", scope()));
         myFixture.checkHighlighting(false, false, false);
         var editor = com.intellij.openapi.fileEditor.FileEditorManager.getInstance(getProject())
                 .getSelectedEditor(consumer.getVirtualFile());
@@ -84,10 +84,10 @@ public class JypeTypeRenameTest extends JypeJavaFixture {
                 "package consumer.deep; public class Consumer { TYPE value; }");
         myFixture.configureFromExistingVirtualFile(parent.getVirtualFile());
         myFixture.getEditor().getCaretModel().moveToOffset(parent.getText().indexOf("\"TYPE\"") + 2);
-        myFixture.renameElementAtCaretUsingHandler("PLAYER");
-        assertTrue(parent.getText(), parent.getText().replaceAll("\\s+", "").contains("name=\"PLAYER\""));
-        assertTrue(child.getText(), child.getText().replaceAll("\\s+", "").contains("name=\"PLAYER\""));
-        assertTrue(usage.getText(), usage.getText().contains("PLAYER value;"));
+        myFixture.renameElementAtCaretUsingHandler("MARK");
+        assertTrue(parent.getText(), parent.getText().replaceAll("\\s+", "").contains("name=\"MARK\""));
+        assertTrue(child.getText(), child.getText().replaceAll("\\s+", "").contains("name=\"MARK\""));
+        assertTrue(usage.getText(), usage.getText().contains("MARK value;"));
         var result = JypeTypeSystemReader.findTypeSystem(getProject(), "consumer.deep", scope());
         assertNotNull(result);
         assertNull(result.error());
@@ -96,26 +96,26 @@ public class JypeTypeRenameTest extends JypeJavaFixture {
 
     public void testRenameConflictsAreReportedBeforeEditingSources() {
         objectSystem("managed", "TYPE");
-        objectSystem("managed.child", "PLAYER");
+        objectSystem("managed.child", "ENTITY");
         PsiClass type = new JypePsiElementFinder(getProject()).findClass("managed.TYPE", scope());
         assertNotNull(type);
         var conflicts = new com.intellij.util.containers.MultiMap<PsiElement, String>();
         new JypeTypeRenameProcessor().findExistingNameConflicts(type, "TYPE", conflicts);
         assertTrue(conflicts.toString(), conflicts.isEmpty());
-        myFixture.addClass("package managed; public class PLAYER {}");
-        new JypeTypeRenameProcessor().findExistingNameConflicts(type, "PLAYER", conflicts);
+        myFixture.addClass("package managed; public class ENTITY {}");
+        new JypeTypeRenameProcessor().findExistingNameConflicts(type, "ENTITY", conflicts);
         assertFalse(conflicts.isEmpty());
     }
 
     public void testRenameDetectsConflictsInUsageSubpackages() {
         objectSystem("managed", "TYPE");
-        myFixture.addClass("package managed.deep; public class PLAYER {}");
+        myFixture.addClass("package managed.deep; public class MARK {}");
         myFixture.addFileToProject("managed/deep/Consumer.java",
                 "package managed.deep; public class Consumer { TYPE value; }");
         PsiClass type = new JypePsiElementFinder(getProject()).findClass("managed.TYPE", scope());
         assertNotNull(type);
         var conflicts = new com.intellij.util.containers.MultiMap<PsiElement, String>();
-        new JypeTypeRenameProcessor().findExistingNameConflicts(type, "PLAYER", conflicts);
+        new JypeTypeRenameProcessor().findExistingNameConflicts(type, "MARK", conflicts);
         assertFalse(conflicts.isEmpty());
         assertTrue(conflicts.toString(), conflicts.values().stream().anyMatch(text -> text.contains("managed.deep")));
     }
@@ -128,7 +128,7 @@ public class JypeTypeRenameTest extends JypeJavaFixture {
         PsiClass type = new JypePsiElementFinder(getProject()).findClass("managed.TYPE", scope());
         assertNotNull(type);
         var conflicts = new com.intellij.util.containers.MultiMap<PsiElement, String>();
-        new JypeTypeRenameProcessor().findExistingNameConflicts(type, "PLAYER", conflicts);
+        new JypeTypeRenameProcessor().findExistingNameConflicts(type, "MARK", conflicts);
         assertFalse(conflicts.isEmpty());
         assertTrue(definition.getText().contains("names.Names.TYPE_NAME"));
         assertTrue(names.getText().contains("\"TYPE\""));
@@ -151,15 +151,15 @@ public class JypeTypeRenameTest extends JypeJavaFixture {
         assertEquals(references.stream().map(ref -> ref.getElement().getContainingFile().getName() + ":"
                 + ref.getElement().getText()).toList().toString(), 3, references.size());
         var usages = new com.intellij.refactoring.rename.RenameProcessor(
-                getProject(), target, "PLAYER", false, false).findUsages();
+                getProject(), target, "MARK", false, false).findUsages();
         assertEquals(Arrays.stream(usages).map(info -> info.getElement() + ":" + info.getReference()).toList().toString(),
                 3, usages.length);
         var classified = com.intellij.refactoring.rename.RenameProcessor.classifyUsages(
                 java.util.List.of(target), java.util.List.of(usages));
         assertEquals(classified.toString(), 3, classified.get(target).size());
-        myFixture.renameElementAtCaretUsingHandler("PLAYER");
-        assertTrue(parent.getText(), parent.getText().replaceAll("\\s+", "").contains("name=\"PLAYER\""));
-        assertTrue(child.getText(), child.getText().replaceAll("\\s+", "").contains("name=\"PLAYER\""));
-        assertTrue(usage.getText(), usage.getText().contains("PLAYER value;"));
+        myFixture.renameElementAtCaretUsingHandler("MARK");
+        assertTrue(parent.getText(), parent.getText().replaceAll("\\s+", "").contains("name=\"MARK\""));
+        assertTrue(child.getText(), child.getText().replaceAll("\\s+", "").contains("name=\"MARK\""));
+        assertTrue(usage.getText(), usage.getText().contains("MARK value;"));
     }
 }

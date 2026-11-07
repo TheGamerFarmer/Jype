@@ -40,6 +40,7 @@ class TypeParamInjector {
     private final TreeMaker make;
     private final Names names;
     private final ProcessingEnvironment env;
+    private final Type objectType;
 
     /**
      * Parameters injected by Jype in pass 1 into partially managed classes.
@@ -62,6 +63,7 @@ class TypeParamInjector {
         this.make = make;
         this.names = names;
         this.env = env;
+        objectType = (Type) env.getElementUtils().getTypeElement("java.lang.Object").asType();
     }
 
     /** Clears the injection table at the start of a new round. */
@@ -120,13 +122,17 @@ class TypeParamInjector {
         if (!missingAny) return;
         if (!ownsAny && !classElement.getModifiers().contains(Modifier.ABSTRACT)) return;
 
-        // For zero-ownership abstract classes, if extends is already fully
-        // parameterized with explicit arguments (JCTypeApply argument count ==
-        // superclass parameter count), there is no need to inject anything:
-        // the user already handles it explicitly.
-        if (!ownsAny && classDecl.extending instanceof JCTree.JCTypeApply ta
+        // A complete superclass application already supplies every parameter; only aliases it
+        // names without declaring them still have to become class parameters.
+        if (classDecl.extending instanceof JCTree.JCTypeApply ta
                 && ta.arguments.size() == superParams.size()) {
-            return;
+            if (!ownsAny) return;
+            Set<String> referenced = new HashSet<>();
+            new com.sun.tools.javac.tree.TreeScanner() {
+                @Override public void visitIdent(JCTree.JCIdent tree) { referenced.add(tree.name.toString()); }
+            }.scan(ta.arguments);
+            missingParams.retainAll(referenced);
+            if (missingParams.isEmpty()) return;
         }
 
         // Record the original order before injection to restore Javadoc sources.
@@ -156,6 +162,8 @@ class TypeParamInjector {
 
         Type.TypeVar newTypeVar = new Type.TypeVar(
                 names.fromString(paramName), classSym, Type.noType);
+        // Symbols are visible to other classes before pass 2 installs their effective F-bounds.
+        JypeAstUtils.setTypeVarBound(newTypeVar, objectType);
 
         JCTree.JCTypeParameter newTypeParam = newJCTypeParameter(paramName, classDecl.pos, newTypeVar);
 

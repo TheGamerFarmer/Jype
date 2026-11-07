@@ -12,18 +12,337 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class JypeReliabilityTest {
     @Test
+    void sourceReferencesUseTheFinalArityOfProcessorManagedTypes() throws IOException {
+        Map<String, String> sources = new LinkedHashMap<>();
+        sources.put("api/ApiBase.java", """
+                package api;
+                public class ApiBase<J_A, J_B, J_C> {}
+                """);
+        sources.put("game/package-info.java", """
+                @fr.thegamerfarmer.jype.annotations.TypeSystem({
+                    @fr.thegamerfarmer.jype.annotations.TypeDef(name="J_A", bound=Alpha.class),
+                    @fr.thegamerfarmer.jype.annotations.TypeDef(name="J_B", bound=Beta.class),
+                    @fr.thegamerfarmer.jype.annotations.TypeDef(name="J_C", bound=Gamma.class)
+                }) package game;
+                """);
+        sources.put("game/Alpha.java", "package game; public class Alpha {}");
+        sources.put("game/Beta.java", "package game; public class Beta {}");
+        sources.put("game/Gamma.java", "package game; public class Gamma {}");
+        sources.put("game/Partial.java", """
+                package game;
+                public class Partial<J_A> extends api.ApiBase<J_A, Beta, Gamma> {}
+                """);
+        sources.put("game/Use.java", """
+                package game;
+                public class Use {
+                    private Partial partial = new Partial();
+                    private java.util.List<Partial> values = new java.util.ArrayList<>();
+                    public Partial accept(Partial value) { return value; }
+                }
+                """);
+
+        JypeTestCompiler.compileWithOptions(sources,
+                "-Xplugin:Jype", "-processor", "fr.thegamerfarmer.jype.JypeProcessorShim",
+                "-Xlint:rawtypes", "-Werror").assertSuccess();
+    }
+
+    @Test
+    void sourceBindingLeavesPreserveInheritedCollectionsAndStaticBounds() throws IOException {
+        Map<String, String> sources = new LinkedHashMap<>();
+        sources.put("managed/package-info.java", """
+                @fr.thegamerfarmer.jype.annotations.TypeSystem({
+                    @fr.thegamerfarmer.jype.annotations.TypeDef(name="J_A", bound=Registry.class),
+                    @fr.thegamerfarmer.jype.annotations.TypeDef(name="J_B", bound=Label.class)
+                }) package managed;
+                """);
+        sources.put("managed/Base.java", """
+                package managed;
+                public abstract class Base {
+                    protected J_A registry;
+                    protected J_B label;
+                    protected java.util.Map<String, Boolean> flags = new java.util.HashMap<>();
+                }
+                """);
+        sources.put("managed/Registry.java", """
+                package managed;
+                public class Registry extends Base {
+                    public boolean enabled() { return flags.get("a") | flags.get("b"); }
+                }
+                """);
+        sources.put("managed/Label.java", "package managed; public abstract class Label extends Base {}");
+        sources.put("managed/Facade.java", """
+                package managed;
+                public class Facade {
+                    public J_A instance;
+                    public static J_A shared;
+                    public void update() { shared = instance; }
+                    public boolean enabled() { return shared.enabled(); }
+                }
+                """);
+        JypeTestCompiler.compilePermissive(sources).assertSuccess();
+        Map<String, String> reversed = new LinkedHashMap<>();
+        sources.entrySet().stream().toList().reversed()
+                .forEach(entry -> reversed.put(entry.getKey(), entry.getValue()));
+        JypeTestCompiler.compilePermissive(reversed).assertSuccess();
+    }
+
+    @Test
+    void concreteSourceBoundIsNotReplacedByAnUnrelatedGenericAncestor() throws IOException {
+        JypeTestCompiler.compileWithOptions(Map.of(
+                "managed/package-info.java", """
+                        @fr.thegamerfarmer.jype.annotations.TypeSystem(
+                            @fr.thegamerfarmer.jype.annotations.TypeDef(name="J_A", bound=Registry.class))
+                        package managed;
+                        """,
+                "managed/Base.java", "package managed; public abstract class Base<J_A> {}",
+                "managed/Registry.java", """
+                        package managed;
+                        public class Registry extends Base<Registry> {
+                            public boolean enabled() { return true; }
+                        }
+                        """,
+                "managed/Facade.java", """
+                        package managed;
+                        public class Facade<J_A> {
+                            public J_A instance;
+                            public static J_A shared;
+                            public void update() { shared = instance; }
+                            public boolean enabled() { return shared.enabled(); }
+                        }
+                        """),
+                "-Xplugin:Jype", "-processor", "fr.thegamerfarmer.jype.JypeProcessorShim").assertSuccess();
+    }
+
+    @Test
+    void reflectionClassTokensDoNotAcquireInstanceTypeArguments() throws IOException {
+        JypeTestCompiler.compileWithOptions(Map.of(
+                "managed/package-info.java", """
+                        @fr.thegamerfarmer.jype.annotations.TypeSystem(
+                            @fr.thegamerfarmer.jype.annotations.TypeDef(name="J_A", bound=Node.class))
+                        package managed;
+                        """,
+                "managed/Node.java", "package managed; public class Node { public J_A linked; }",
+                "managed/Reflection.java", """
+                        package managed;
+                        @SuppressWarnings("rawtypes")
+                        public class Reflection {
+                            public static <T> java.util.Set<Class<? extends T>> subtypes(Class<T> type) {
+                                return java.util.Set.of();
+                            }
+                            public void inspect() {
+                                for (Class<? extends Node> type : subtypes(Node.class)) {
+                                    type.getName();
+                                }
+                            }
+                        }
+                        """),
+                "-Xplugin:Jype", "-processor", "fr.thegamerfarmer.jype.JypeProcessorShim",
+                "-Xlint:rawtypes,unchecked", "-Werror").assertSuccess();
+    }
+
+    @Test
+    void processorInjectedBoundParametersAreReadableBeforeTheBoundClassPass() throws IOException {
+        Map<String, String> sources = new LinkedHashMap<>();
+        sources.put("api/Base.java", "package api; public class Base<J_A, J_B> {}");
+        sources.put("game/package-info.java", """
+                @fr.thegamerfarmer.jype.annotations.TypeSystem({
+                    @fr.thegamerfarmer.jype.annotations.TypeDef(name="J_A", bound=Alpha.class),
+                    @fr.thegamerfarmer.jype.annotations.TypeDef(name="J_B", bound=Beta.class)
+                }) package game;
+                """);
+        sources.put("game/Consumer.java", "package game; public class Consumer extends api.Base {}");
+        sources.put("game/Alpha.java", "package game; public class Alpha {}");
+        sources.put("game/Beta.java", "package game; public abstract class Beta extends api.Base {}");
+        JypeTestCompiler.compileWithOptions(sources, "-processor",
+                "fr.thegamerfarmer.jype.JypeProcessorShim").assertSuccess();
+        Map<String, String> reversed = new LinkedHashMap<>();
+        sources.entrySet().stream().toList().reversed().forEach(entry -> reversed.put(entry.getKey(), entry.getValue()));
+        JypeTestCompiler.compileWithOptions(reversed, "-processor",
+                "fr.thegamerfarmer.jype.JypeProcessorShim").assertSuccess();
+        JypeTestCompiler.compile(sources).assertSuccess();
+        JypeTestCompiler.compile(reversed).assertSuccess();
+    }
+
+    @Test
+    void inheritedTypeSystemCanSpecializeGenericBoundsAcrossCompiledModules() throws IOException {
+        Map<String, String> api = new LinkedHashMap<>();
+        Map<String, String> apiBounds = new LinkedHashMap<>();
+        apiBounds.put("J_A", "ApiAlpha");
+        apiBounds.put("J_B", "ApiBeta");
+        apiBounds.put("J_C", "ApiGamma");
+        apiBounds.put("J_D", "ApiDelta");
+        apiBounds.put("J_E", "ApiEpsilon");
+        apiBounds.put("J_F", "ApiZeta");
+        apiBounds.put("J_G", "ApiEta");
+        apiBounds.put("J_H", "ApiTheta");
+        apiBounds.put("J_I", "ApiIota");
+        apiBounds.put("J_J", "ApiKappa");
+        apiBounds.put("J_K", "ApiLambda");
+        apiBounds.put("J_L", "ApiMu");
+        apiBounds.put("J_M", "ApiNu");
+        apiBounds.put("J_N", "ApiXi");
+        apiBounds.put("J_O", "ApiOmicron");
+        apiBounds.put("J_P", "ApiPi");
+        apiBounds.put("J_Q", "ApiRho");
+        apiBounds.put("J_R", "ApiSigma");
+        apiBounds.put("J_S", "ApiTau");
+        String typeDefinitions = apiBounds.entrySet().stream()
+                .map(entry -> "@fr.thegamerfarmer.jype.annotations.TypeDef(name=\""
+                        + entry.getKey() + "\", bound=" + entry.getValue() + ".class)")
+                .collect(java.util.stream.Collectors.joining(",\n"));
+        api.put("api/package-info.java", """
+                @fr.thegamerfarmer.jype.annotations.TypeSystem({
+                    %s
+                }) package api;
+                """.formatted(typeDefinitions));
+        String fields = apiBounds.keySet().stream()
+                .map(name -> "protected " + name + " " + Character.toLowerCase(name.charAt(0))
+                        + name.substring(1) + ";")
+                .collect(java.util.stream.Collectors.joining("\n"));
+        api.put("api/ApiBase.java", "package api; public class ApiBase {" + fields + "}");
+        for (String type : apiBounds.values()) {
+            String modifier = type.equals("ApiBeta") || type.equals("ApiGamma") ? "abstract " : "";
+            api.put("api/" + type + ".java", "package api; public " + modifier
+                    + "class " + type + " extends ApiBase {}");
+        }
+        String staticFields = apiBounds.keySet().stream()
+                .map(name -> "@lombok.Getter @lombok.Setter protected static " + name + " "
+                        + Character.toLowerCase(name.charAt(0)) + name.substring(1) + ";")
+                .collect(java.util.stream.Collectors.joining("\n"));
+        api.put("api/ApiHub.java", "package api; public class ApiHub {" + staticFields + "}");
+        api.put("api/Contract.java", "package api; public interface Contract { void run(J_A item); }");
+        api.put("api/ApiMasterForm.java", "package api; public abstract class ApiMasterForm extends ApiBase {}");
+        api.put("api/ApiSubForm.java", """
+                package api;
+                public abstract class ApiSubForm<MASTER_FORM extends ApiMasterForm> extends ApiBase {
+                    public MASTER_FORM master;
+                }
+                """);
+
+        Map<String, String> game = new LinkedHashMap<>();
+        Map<String, String> overrides = new LinkedHashMap<>();
+        overrides.put("J_A", "ImplAlpha");
+        overrides.put("J_B", "ImplBeta");
+        overrides.put("J_C", "ImplGamma");
+        overrides.put("J_D", "ImplDelta");
+        overrides.put("J_E", "ImplEpsilon");
+        overrides.put("J_F", "ImplZeta");
+        overrides.put("J_G", "ImplEta");
+        overrides.put("J_H", "ImplTheta");
+        overrides.put("J_O", "ImplOmicron");
+        overrides.put("J_Q", "ImplRho");
+        overrides.put("J_R", "ImplSigma");
+        String overrideDefinitions = overrides.entrySet().stream()
+                .map(entry -> "@fr.thegamerfarmer.jype.annotations.TypeDef(name=\""
+                        + entry.getKey() + "\", bound=" + entry.getValue() + ".class)")
+                .collect(java.util.stream.Collectors.joining(",\n"));
+        game.put("game/package-info.java", """
+                @fr.thegamerfarmer.jype.annotations.TypeSystem(
+                    inherit="api",
+                    overrides={
+                        %s
+                    }
+                ) package game;
+                """.formatted(overrideDefinitions));
+        for (var entry : overrides.entrySet()) {
+            String type = entry.getValue();
+            String parent = apiBounds.get(entry.getKey());
+            String modifier = type.equals("ImplBeta") || type.equals("ImplGamma") ? "abstract " : "";
+            String body = type.equals("ImplAlpha") ? """
+                    public ImplBeta linked() { return j_B; }
+                    public ApiIota store() { return j_I; }
+                    """ : "";
+            game.put("game/" + type + ".java", "package game; import api." + parent + "; import api.ApiIota;"
+                    + " public " + modifier + "class " + type + " extends " + parent + " {" + body + "}");
+        }
+        game.put("game/variants/ImplBetaLeaf.java", """
+                package game.variants;
+                import game.ImplBeta;
+                public class ImplBetaLeaf extends ImplBeta {}
+                """);
+        game.put("game/Util.java", """
+                package game;
+                import api.ApiHub;
+                import api.ApiIota;
+                public class Util {
+                    public ImplAlpha first(java.util.List<ImplAlpha> items) { return items.get(0); }
+                    public static ApiIota store() { return ApiHub.getJ_I(); }
+                    public static ApiIota store(ImplAlpha item) { return item.store(); }
+                }
+                """);
+        game.put("game/ImplBase.java", """
+                package game;
+                import api.ApiBase;
+                public abstract class ImplBase extends ApiBase {
+                    public ImplAlpha item() { return j_A; }
+                }
+                """);
+        game.put("game/Gui.java", """
+                package game;
+                public class Gui extends ImplBase {
+                    public static void open(ImplAlpha item) { item.linked(); }
+                }
+                """);
+        game.put("game/forms/ImplMasterForm.java", """
+                package game.forms;
+                import api.ApiMasterForm;
+                public abstract class ImplMasterForm extends ApiMasterForm {}
+                """);
+        game.put("game/forms/ImplSubForm.java", """
+                package game.forms;
+                import api.ApiSubForm;
+                public abstract class ImplSubForm<MASTER_FORM extends ImplMasterForm> extends ApiSubForm<MASTER_FORM> {}
+                """);
+        game.put("game/forms/ConcreteForm.java", "package game.forms; public class ConcreteForm extends ImplMasterForm {}");
+        game.put("game/forms/ConcreteSubForm.java", """
+                package game.forms;
+                public class ConcreteSubForm extends ImplSubForm<ConcreteForm> {
+                    public ConcreteForm root() { return master; }
+                }
+                """);
+        game.put("game/Variants.java", """
+                package game;
+                public enum Variants implements api.Contract {
+                    DEFAULT;
+                    @Override public void run(ImplAlpha item) { item.linked(); }
+                }
+                """);
+        game.put("game/Category.java", """
+                package game;
+                public enum Category {
+                    STANDARD;
+                    public boolean accepts(ImplAlpha item) { return item != null; }
+                    public static java.util.List<Category> all() { return java.util.Arrays.asList(values()); }
+                }
+                """);
+        game.put("game/Main.java", """
+                package game;
+                import api.ApiHub;
+                import api.ApiIota;
+                public class Main extends ApiHub {
+                    public ApiIota store(ImplAlpha item) {
+                        ImplBeta linked = item.linked();
+                        return linked == null ? item.store() : item.store();
+                    }
+                }
+                """);
+
+        JypeTestCompiler.compileTwoPassWithJype(api, game).assertSuccess();
+    }
+
+    @Test
     void partialMemberArgumentsAreCompletedBeforeEnter() throws IOException {
         Map<String, String> sources = new LinkedHashMap<>();
         sources.put("managed/package-info.java", """
                 @fr.thegamerfarmer.jype.annotations.TypeSystem({
-                    @fr.thegamerfarmer.jype.annotations.TypeDef(name="PLAYER", bound=Player.class)
+                    @fr.thegamerfarmer.jype.annotations.TypeDef(name="J_A", bound=Entity.class)
                 }) package managed;
                 """);
-        sources.put("managed/Player.java", "package managed; public class Player { public int value; }");
+        sources.put("managed/Entity.java", "package managed; public class Entity { public int value; }");
         sources.put("managed/Values.java", """
                 package managed;
                 public class Values<T> {
-                    PLAYER player;
+                    J_A entity;
                     Values<T> copy;
                     public Values() {}
                     public Values(Values<T> source) { copy = source; }
@@ -33,7 +352,7 @@ class JypeReliabilityTest {
                 package managed;
                 public class Registry {
                     Values<String> values = new Values<>();
-                    PLAYER instance;
+                    J_A instance;
                     Values<String> copy() { return new Values<String>(values); }
                 }
                 """);

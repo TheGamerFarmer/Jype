@@ -15,6 +15,8 @@ import static fr.thegamerfarmer.jype.ParsedTypeSystems.*;
  */
 final class StaticBoundResolver {
     final Map<String, Map<String, String>> bounds = new LinkedHashMap<>();
+    private final Map<String, String> parents = new LinkedHashMap<>();
+    private final Set<String> localDefinitions = new HashSet<>();
     private final JavaFileManager fileManager;
     private final SourceHierarchy hierarchy;
 
@@ -26,7 +28,6 @@ final class StaticBoundResolver {
 
     /** Collects source bounds, then merges transitive parents without replacing explicit overrides. */
     void collectStaticBounds(List<JCTree.JCCompilationUnit> cus, Map<String, List<String>> index) {
-        Map<String, String> parents = new LinkedHashMap<>();
         for (var cu : cus) {
             for (var def : cu.defs) {
                 if (!(def instanceof JCTree.JCPackageDecl pkg)) continue;
@@ -50,7 +51,10 @@ final class StaticBoundResolver {
                                 }
                                 if (name != null && bound != null) {
                                     String qualified = hierarchy.resolveTypeName(index, cu, bound, true);
-                                    if (qualified != null) packageBounds.put(name, qualified);
+                                    if (qualified != null) {
+                                        packageBounds.put(name, qualified);
+                                        localDefinitions.add(scope);
+                                    }
                                 }
                             }
                             super.visitAnnotation(tree);
@@ -64,6 +68,15 @@ final class StaticBoundResolver {
         for (String scope : bounds.keySet()) {
             inheritStaticBounds(scope, parents, new HashSet<>());
         }
+    }
+
+    /** Reports whether a local system explicitly inherits another package's bindings. */
+    boolean inherits(String scope) {
+        return parents.containsKey(scope);
+    }
+
+    boolean hasLocalDefinitions(String scope) {
+        return localDefinitions.contains(scope);
     }
 
     Map<String, String> effectiveBounds(String scope) {

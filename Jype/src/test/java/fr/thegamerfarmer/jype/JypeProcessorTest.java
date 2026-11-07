@@ -128,7 +128,7 @@ class JypeProcessorTest {
     @Test
     @DisplayName("Concrete class in pkg2 extends raw class in pkg1 → Jype injects concrete type FQNs")
     void rawExtendsWithCrossPackageFqn() throws IOException {
-        // Reproduces APIUHC's MyPlayer/Speed/Strength/Resistance pattern:
+        // Reproduces cross-package concrete type FQN injection:
         //   concrete types (ConcreteA, ConcreteB) are in a different package
         //   from the leaf class (Consumer) → Jype must inject FQNs to avoid
         //   "cannot find symbol" errors caused by missing imports.
@@ -774,9 +774,9 @@ class JypeProcessorTest {
         sources.put("apipkg/AbstractHolder.java", """
                 package apipkg;
                 public abstract class AbstractHolder extends Base {
-                    protected TYPE_A player;
-                    public abstract void setPlayer(TYPE_A player);
-                    public abstract TYPE_B getRole();
+                    protected TYPE_A item;
+                    public abstract void setItem(TYPE_A item);
+                    public abstract TYPE_B getLinked();
                 }
                 """);
 
@@ -812,27 +812,27 @@ class JypeProcessorTest {
         // extends with Base<ConcreteA,ConcreteB> → no rawtypes warning on Consumer.
         Map<String, String> sources = new LinkedHashMap<>(baseFixture());
 
-        // Service has a generic <TYPE_A> method: TYPE_A is a METHOD type parameter.
+        // Wrapper has a generic <TYPE_A> method: TYPE_A is a METHOD type parameter.
         // Without the fix: findUsedManagedNames detects TYPE_A in the return type →
-        //   Jype injects TYPE_A,TYPE_B as CLASS parameters → Service<TYPE_A,TYPE_B>
-        //   → "new Service()" in Consumer is rawtypes → -Werror → failure.
+        //   Jype injects TYPE_A,TYPE_B as CLASS parameters → Wrapper<TYPE_A,TYPE_B>
+        //   → "new Wrapper()" in Consumer is rawtypes → -Werror → failure.
         // With the fix: TYPE_A is excluded because it is a method parameter → no injection
-        //   → Service is not generic → "new Service()" is OK → success.
-        sources.put("testpkg/Service.java", """
+        //   → Wrapper is not generic → "new Wrapper()" is OK → success.
+        sources.put("testpkg/Wrapper.java", """
                 package testpkg;
                 import java.util.Map;
                 import java.util.HashMap;
-                public class Service {
+                public class Wrapper {
                     public <TYPE_A> Map<String, TYPE_A> getAll() { return new HashMap<>(); }
                 }
                 """);
 
         // Consumer extends Base (→ completed as Base<ConcreteA,ConcreteB> by JypePlugin)
-        // and instantiates Service. If Service becomes generic (bug), new Service() is rawtypes.
+        // and instantiates Wrapper. If Wrapper becomes generic (bug), new Wrapper() is rawtypes.
         sources.put("testpkg/Consumer.java", """
                 package testpkg;
                 public class Consumer extends Base {
-                    private Service service = new Service();
+                    private Wrapper wrapper = new Wrapper();
                 }
                 """);
 
@@ -916,7 +916,7 @@ class JypeProcessorTest {
         sources.put("bndpkg/APIPower.java", """
                 package bndpkg;
                 public abstract class APIPower {
-                    protected J_A player;
+                    protected J_A item;
                 }
                 """);
 
@@ -939,12 +939,12 @@ class JypeProcessorTest {
     @Test
     @DisplayName("Abstract class with no body usage and raw extends to a fully managed class → Jype injects parameters and completes extends")
     void abstractRawExtendsAllManagedParams() throws IOException {
-        // Reproduces the API UHC Role/APIRole pattern:
-        //   APIRole uses J_A in its body → plugin injects J_A and J_B.
-        //   Role extends APIRole raw — an abstract class with no body usage.
-        //   → propagateBoundDependencies: APIRole is fully managed → injects J_A, J_B into Role.
-        //   → fixClassDecl (all-managed abstract path): Role extends APIRole<J_A, J_B>.
-        //   No concrete type (e.g. MyPlayer) should appear in Role.
+        // Abstract class with no body usage, raw-extends a fully managed class:
+        //   AbstractKind uses J_A in its body → plugin injects J_A and J_B.
+        //   ChildKind extends AbstractKind raw — an abstract class with no body usage.
+        //   → propagateBoundDependencies: AbstractKind is fully managed → injects J_A, J_B into ChildKind.
+        //   → fixClassDecl (all-managed abstract path): ChildKind extends AbstractKind<J_A, J_B>.
+        //   No concrete type should appear in ChildKind.
         Map<String, String> sources = new LinkedHashMap<>();
         sources.put("rolepkg/package-info.java", """
                 @fr.thegamerfarmer.jype.annotations.TypeSystem({
@@ -953,31 +953,31 @@ class JypeProcessorTest {
                 })
                 package rolepkg;
                 """);
-        sources.put("rolepkg/APIRole.java", """
+        sources.put("rolepkg/AbstractKind.java", """
                 package rolepkg;
-                public abstract class APIRole {
-                    protected J_A player;
+                public abstract class AbstractKind {
+                    protected J_A item;
                 }
                 """);
-        sources.put("rolepkg/Role.java", """
+        sources.put("rolepkg/ChildKind.java", """
                 package rolepkg;
-                public abstract class Role extends APIRole {
+                public abstract class ChildKind extends AbstractKind {
                 }
                 """);
         JypeTestCompiler.compile(sources).assertSuccess();
     }
 
     @Test
-    @DisplayName("Nested wildcard: Sub<?> in completed extends → expandAllNestedWildcards → Sub<?,?,?>")
+    @DisplayName("Nested wildcard: Secondary<?> in completed extends → expandAllNestedWildcards → Secondary<?,?,?>")
     void nestedWildcardExpandedInExtendsArg() throws IOException {
-        // Reproduces the SubPower/MasterPower pattern:
-        //   APIMaster<SUB_T> uses J_A → injects J_A, J_B → APIMaster<SUB_T, J_A, J_B>
-        //   Master extends APIMaster<Sub<?>> → tryInjectManagedParams → Master<J_A,J_B>
-        //     extends APIMaster<Sub<?>, J_A, J_B>
-        //   Sub<M extends Master> extends APISub<Sub<?>, M> :
-        //     APISub<SUB,M> obtient J_A,J_B → APISub<SUB,M,J_A,J_B>
-        //     tryInjectManagedParams → Sub<M,J_A,J_B> extends APISub<Sub<?>,M,J_A,J_B>
-        //   Post-pass: Sub<?> → Sub<?,?,?,> (3 parameters).
+        // Reproduces the primary/secondary hierarchy pattern:
+        //   AbstractPrimary<CHILD_T> uses J_A → injects J_A, J_B → AbstractPrimary<CHILD_T, J_A, J_B>
+        //   Primary extends AbstractPrimary<Secondary<?>> → tryInjectManagedParams → Primary<J_A,J_B>
+        //     extends AbstractPrimary<Secondary<?>, J_A, J_B>
+        //   Secondary<M extends Primary> extends AbstractSecondary<Secondary<?>, M> :
+        //     AbstractSecondary<CHILD,M> gets J_A,J_B → AbstractSecondary<CHILD,M,J_A,J_B>
+        //     tryInjectManagedParams → Secondary<M,J_A,J_B> extends AbstractSecondary<Secondary<?>,M,J_A,J_B>
+        //   Post-pass: Secondary<?> → Secondary<?,?,?,> (3 parameters).
         Map<String, String> sources = new LinkedHashMap<>();
         sources.put("subpkg/package-info.java", """
                 @fr.thegamerfarmer.jype.annotations.TypeSystem({
@@ -986,29 +986,29 @@ class JypeProcessorTest {
                 })
                 package subpkg;
                 """);
-        // APIMaster uses J_A → injects J_A, J_B.
-        sources.put("subpkg/APIMaster.java", """
+        // AbstractPrimary uses J_A → injects J_A, J_B.
+        sources.put("subpkg/AbstractPrimary.java", """
                 package subpkg;
-                public abstract class APIMaster<API_SUB> {
-                    public abstract void give(J_A player);
+                public abstract class AbstractPrimary<API_CHILD> {
+                    public abstract void give(J_A item);
                 }
                 """);
-        // APISub does not use J_A/J_B in its body.
-        sources.put("subpkg/APISub.java", """
+        // AbstractSecondary does not use J_A/J_B in its body.
+        sources.put("subpkg/AbstractSecondary.java", """
                 package subpkg;
-                public abstract class APISub<SUB, MASTER> {
+                public abstract class AbstractSecondary<CHILD, PRIMARY> {
                 }
                 """);
-        // Master extends APIMaster<Sub<?>> → parameters injected through tryInjectManagedParams.
-        sources.put("subpkg/Master.java", """
+        // Primary extends AbstractPrimary<Secondary<?>> → parameters injected through tryInjectManagedParams.
+        sources.put("subpkg/Primary.java", """
                 package subpkg;
-                public abstract class Master extends APIMaster<Sub<?>> {
+                public abstract class Primary extends AbstractPrimary<Secondary<?>> {
                 }
                 """);
-        // Sub<M extends Master> extends APISub<Sub<?>, M>
-        sources.put("subpkg/Sub.java", """
+        // Secondary<M extends Primary> extends AbstractSecondary<Secondary<?>, M>
+        sources.put("subpkg/Secondary.java", """
                 package subpkg;
-                public abstract class Sub<M extends Master> extends APISub<Sub<?>, M> {
+                public abstract class Secondary<M extends Primary> extends AbstractSecondary<Secondary<?>, M> {
                 }
                 """);
         JypeTestCompiler.compile(sources).assertSuccess();
@@ -1017,11 +1017,11 @@ class JypeProcessorTest {
     @Test
     @DisplayName("Explicitly provided shared parameter + managed trailing parameters → tryBuildTrailingManagedArgs completes extends")
     void trailingManagedArgsAfterExplicitSharedParam() throws IOException {
-        // Reproduces the SubPower case where a type parameter has the SAME name as the superclass parameter:
-        //   APISub<API_SUB_POWER, MASTER_POWER, J_A, J_B> — after J_A, J_B are propagated
-        //   Sub<MASTER_POWER extends Master> → MASTER_POWER belongs to both ownParams AND superParams.
-        //     buildFixedArgs: nonShared = 1 (API_SUB_POWER), provided = 2 → fails.
-        //     tryBuildTrailingManagedArgs: trailing [J_A, J_B] ∈ ownParams → [Sub<?>, MASTER_POWER, J_A, J_B].
+        // Reproduces the case where a type parameter has the SAME name as the superclass parameter:
+        //   AbstractSecondary<API_CHILD, PARENT, J_A, J_B> — after J_A, J_B are propagated
+        //   Secondary<PARENT extends Primary> → PARENT belongs to both ownParams AND superParams.
+        //     buildFixedArgs: nonShared = 1 (API_CHILD), provided = 2 → fails.
+        //     tryBuildTrailingManagedArgs: trailing [J_A, J_B] ∈ ownParams → [Secondary<?>, PARENT, J_A, J_B].
         Map<String, String> sources = new LinkedHashMap<>();
         sources.put("trailpkg/package-info.java", """
                 @fr.thegamerfarmer.jype.annotations.TypeSystem({
@@ -1030,31 +1030,31 @@ class JypeProcessorTest {
                 })
                 package trailpkg;
                 """);
-        // APIMaster uses J_A → injects J_A, J_B → APIMaster<API_SUB, J_A, J_B>.
-        sources.put("trailpkg/APIMaster.java", """
+        // AbstractPrimary uses J_A → injects J_A, J_B → AbstractPrimary<API_CHILD, J_A, J_B>.
+        sources.put("trailpkg/AbstractPrimary.java", """
                 package trailpkg;
-                public abstract class APIMaster<API_SUB> {
-                    public abstract void give(J_A player);
+                public abstract class AbstractPrimary<API_CHILD> {
+                    public abstract void give(J_A item);
                 }
                 """);
-        // APISub<SUB, MASTER_POWER> → after propagation from APIMaster: APISub<SUB, MASTER_POWER, J_A, J_B>.
-        sources.put("trailpkg/APISub.java", """
+        // AbstractSecondary<CHILD, PARENT> → after propagation from AbstractPrimary: AbstractSecondary<CHILD, PARENT, J_A, J_B>.
+        sources.put("trailpkg/AbstractSecondary.java", """
                 package trailpkg;
-                public abstract class APISub<SUB, MASTER_POWER extends APIMaster<SUB>> {
+                public abstract class AbstractSecondary<CHILD, PARENT extends AbstractPrimary<CHILD>> {
                 }
                 """);
-        // Master extends APIMaster<Sub<?>> → J_A, J_B injected → Master<J_A, J_B>.
-        sources.put("trailpkg/Master.java", """
+        // Primary extends AbstractPrimary<Secondary<?>> → J_A, J_B injected → Primary<J_A, J_B>.
+        sources.put("trailpkg/Primary.java", """
                 package trailpkg;
-                public abstract class Master extends APIMaster<Sub<?>> {
+                public abstract class Primary extends AbstractPrimary<Secondary<?>> {
                 }
                 """);
-        // Sub<MASTER_POWER extends Master> extends APISub<Sub<?>, MASTER_POWER>
-        // MASTER_POWER (Sub parameter) == MASTER_POWER (APISub parameter) → "shared" in buildFixedArgs.
-        // → tryBuildTrailingManagedArgs must complete: [Sub<?>, MASTER_POWER, J_A, J_B].
-        sources.put("trailpkg/Sub.java", """
+        // Secondary<PARENT extends Primary> extends AbstractSecondary<Secondary<?>, PARENT>
+        // PARENT (Secondary parameter) == PARENT (AbstractSecondary parameter) → "shared" in buildFixedArgs.
+        // → tryBuildTrailingManagedArgs must complete: [Secondary<?>, PARENT, J_A, J_B].
+        sources.put("trailpkg/Secondary.java", """
                 package trailpkg;
-                public abstract class Sub<MASTER_POWER extends Master> extends APISub<Sub<?>, MASTER_POWER> {
+                public abstract class Secondary<PARENT extends Primary> extends AbstractSecondary<Secondary<?>, PARENT> {
                 }
                 """);
         JypeTestCompiler.compile(sources).assertSuccess();
@@ -1063,7 +1063,7 @@ class JypeProcessorTest {
     @Test
     @DisplayName("Class uses a managed name ONLY in a method body → Jype injects parameters through body scanning")
     void bodyOnlyLocalVarInjectsTypeParams() throws IOException {
-        // Reproduces the API UHC api_commands.Role pattern:
+        // Class uses a managed name only in a local variable (body scanning):
         //   Cmd extends APIBase raw (no managed parameters in fields/signatures)
         //   but uses J_A as a local variable type in execute():
         //     J_A item = null;
@@ -1119,9 +1119,9 @@ class JypeProcessorTest {
     @Test
     @DisplayName("Abstract binding class in concreteSimpleNameSet stays non-generic — gets Color-Enum concrete extends")
     void abstractBindingClassGetsConcreteExtends() throws IOException {
-        // Reproduces the roles.Role / APIRole pattern from APIUHC:
+        // Abstract binding class stays non-generic via concreteSimpleNameSet:
         //   APIJa/APIJb have explicit F-recursive type params (user-declared).
-        //   BindingA extends APIJa raw — like roles.Role extends APIRole.
+        //   BindingA extends APIJa raw — an abstract class entered into concreteSimpleNameSet.
         //   Anchor extends APIJa<BindingA, BindingB> → BindingA enters concreteSimpleNameSet.
         // Without fix: BindingA becomes generic via propagation → TypeInjectionPass injects
         //   F-recursive bounds → raw BindingA used in Anchor fails "not within bounds".
@@ -1182,8 +1182,8 @@ class JypeProcessorTest {
                 import java.util.List;
                 import java.util.ArrayList;
                 public abstract class APIBase<J_A, J_B> {
-                    protected List<J_A> players = new ArrayList<>();
-                    public List<J_A> getPlayers() { return players; }
+                    protected List<J_A> items = new ArrayList<>();
+                    public List<J_A> getItems() { return items; }
                 }
                 """);
         sources.put("forpkg/ConcreteJA.java", """
@@ -1199,14 +1199,14 @@ class JypeProcessorTest {
                 public abstract class Pivot extends APIBase<ConcreteJA, ConcreteJB> {}
                 """);
         // FinalHeal: J_A appears ONLY in the enhanced for loop variable type.
-        // getPlayers() is inherited (return type has J_A in APIBase, not FinalHeal scope).
+        // getItems() is inherited (return type has J_A in APIBase, not FinalHeal scope).
         // Without deep scanning: no top-level JCVariableDecl with J_A → no injection → "cannot find symbol J_A".
         // With deep scanning: JCEnhancedForLoop.var.vartype = J_A → inject J_A, J_B → compiles.
         sources.put("forpkg/FinalHeal.java", """
                 package forpkg;
                 public class FinalHeal extends APIBase {
                     public void execute() {
-                        for (J_A player : getPlayers()) {
+                        for (J_A item : getItems()) {
                         }
                     }
                 }
@@ -1262,11 +1262,11 @@ class JypeProcessorTest {
     @Test
     @DisplayName("Abstract Jype class used as concrete type arg is filtered — real concrete type wins in concreteTypeMap")
     void abstractTypeArgFilteredFromConcreteTypeMap() throws IOException {
-        // Reproduces APIUHC bug: APIPlayerJoinEvent extends EventBase<APIPlayer,...> where APIPlayer
-        // is abstract and has managed params. Without the fix, collectConcreteTypes records
-        // J_A→APIPlayer (abstract) before Power registers J_A→MyPlayer. buildConcreteArgs then
-        // emits "extends APIAbstract<APIPlayer,...>" → "type argument not within bounds".
-        // With fix: APIPlayer has managed params in typeParamMap → skipped → MyPlayer wins.
+        // Abstract Jype class used as concrete type arg is filtered — real concrete type wins:
+        //   EventClass extends EventBase<APIBase, AbstractY> where both are abstract with managed params.
+        //   Without the fix, collectConcreteTypes records J_A→APIBase (abstract) before Power registers
+        //   J_A→ConcreteX. buildConcreteArgs then emits "extends EventBase<APIBase,...>" → "not within bounds".
+        //   With fix: APIBase has managed params in typeParamMap → skipped → ConcreteX wins.
         Map<String, String> sources = new LinkedHashMap<>();
         sources.put("filtpkg/package-info.java", """
                 @fr.thegamerfarmer.jype.annotations.TypeSystem({
@@ -1275,17 +1275,17 @@ class JypeProcessorTest {
                 })
                 package filtpkg;
                 """);
-        // APIBase and APIRole: abstract, use J_A/J_B in fields → Jype injects J_A,J_B into both
+        // APIBase and AbstractY: abstract, use J_A/J_B in fields → Jype injects J_A,J_B into both
         sources.put("filtpkg/APIBase.java", """
                 package filtpkg;
                 public abstract class APIBase {
                     protected J_A item;
                 }
                 """);
-        sources.put("filtpkg/APIRole.java", """
+        sources.put("filtpkg/AbstractY.java", """
                 package filtpkg;
-                public abstract class APIRole {
-                    protected J_B role;
+                public abstract class AbstractY {
+                    protected J_B linked;
                 }
                 """);
         // EventBase: user-declared J_A,J_B params
@@ -1293,30 +1293,30 @@ class JypeProcessorTest {
                 package filtpkg;
                 public abstract class EventBase<J_A, J_B> {}
                 """);
-        // EventClass BEFORE Power: extends EventBase<APIBase, APIRole>
-        // Without fix: J_A→APIBase and J_B→APIRole pollute concreteTypeMap (both abstract).
-        // With fix: both have managed params → filtered → slots stay empty for Power/Role to fill.
-        // @SuppressWarnings("rawtypes"): APIBase/APIRole are generic after Jype injection;
-        // passing them without type args triggers -Xlint:rawtypes — suppressed here as the
-        // pattern mirrors APIUHC sources (APIPlayer passed raw in event class declarations).
+        // EventClass BEFORE Power: extends EventBase<APIBase, AbstractY>
+        // Without fix: J_A→APIBase and J_B→AbstractY pollute concreteTypeMap (both abstract).
+        // With fix: both have managed params → filtered → slots stay empty for Power/KindPivot to fill.
+        // @SuppressWarnings("rawtypes"): APIBase/AbstractY are generic after Jype injection;
+        // passing them without type args triggers -Xlint:rawtypes — suppressed here because
+        // the abstract types are intentionally used raw before concrete anchors are declared.
         sources.put("filtpkg/EventClass.java", """
                 package filtpkg;
                 @SuppressWarnings("rawtypes")
-                public class EventClass extends EventBase<APIBase, APIRole> {}
+                public class EventClass extends EventBase<APIBase, AbstractY> {}
                 """);
         // Concrete types with no managed params
-        sources.put("filtpkg/MyPlayer.java", "package filtpkg; public class MyPlayer {}");
-        sources.put("filtpkg/MyRole.java", "package filtpkg; public class MyRole {}");
-        // Power/RolePivot: establish J_A→MyPlayer, J_B→MyRole in concreteTypeMap
+        sources.put("filtpkg/ConcreteX.java", "package filtpkg; public class ConcreteX {}");
+        sources.put("filtpkg/ConcreteY.java", "package filtpkg; public class ConcreteY {}");
+        // Power/KindPivot: establish J_A→ConcreteX, J_B→ConcreteY in concreteTypeMap
         sources.put("filtpkg/Power.java", """
                 package filtpkg;
-                public abstract class Power extends APIBase<MyPlayer, MyRole> {}
+                public abstract class Power extends APIBase<ConcreteX, ConcreteY> {}
                 """);
-        sources.put("filtpkg/RolePivot.java", """
+        sources.put("filtpkg/KindPivot.java", """
                 package filtpkg;
-                public abstract class RolePivot extends APIRole<MyPlayer, MyRole> {}
+                public abstract class KindPivot extends AbstractY<ConcreteX, ConcreteY> {}
                 """);
-        // Leaf: raw extends APIBase → buildConcreteArgs must emit MyPlayer/MyRole (not APIBase/APIRole)
+        // Leaf: raw extends APIBase → buildConcreteArgs must emit ConcreteX/ConcreteY (not APIBase/AbstractY)
         sources.put("filtpkg/Leaf.java", """
                 package filtpkg;
                 public class Leaf extends APIBase {}
@@ -1327,8 +1327,8 @@ class JypeProcessorTest {
     @Test
     @DisplayName("Managed type used only inside a lambda body → lambda scanning injects params")
     void lambdaBodyTriggersBodyInjection() throws IOException {
-        // Reproduces OnEveryOneSecond pattern from APIUHC:
-        //   Bukkit.getScheduler().runTask(plugin, () -> { for (J_A player : getPlayers()) {...} })
+        // Managed type used only inside a lambda body (deep scanning):
+        //   runLater(() -> { for (J_A item : getItems()) {...} })
         // The for-each is inside a JCLambda passed as argument to a JCMethodInvocation,
         // which is itself a JCExpressionStatement — not handled by the old scanner.
         // New scanner: JCExpressionStatement → scanExprForManagedTypes → JCMethodInvocation args
@@ -1345,7 +1345,7 @@ class JypeProcessorTest {
                 package lambdapkg;
                 import java.util.List;
                 public abstract class APIBase<J_A, J_B> {
-                    public List<J_A> getPlayers() { return null; }
+                    public List<J_A> getItems() { return null; }
                 }
                 """);
         sources.put("lambdapkg/Scheduler.java", """
@@ -1366,7 +1366,7 @@ class JypeProcessorTest {
                 public class Task extends APIBase {
                     public void execute() {
                         Scheduler.runLater(() -> {
-                            for (J_A player : getPlayers()) {
+                            for (J_A item : getItems()) {
                             }
                         });
                     }
@@ -1378,9 +1378,9 @@ class JypeProcessorTest {
     @Test
     @DisplayName("Raw bound converted to a typed bound when all parameters are in ownParams")
     void rawBoundConvertedToTyped() throws IOException {
-        // Reproduces the SubPower pattern: <M extends Master>, where Master has managed parameters.
-        // After injection, Sub has J_A,J_B in ownParams.
-        // fixTypeParamBounds: raw Master bound (JCIdent) → Master<J_A,J_B> (JCTypeApply).
+        // Reproduces the primary/secondary pattern: <M extends Primary>, where Primary has managed parameters.
+        // After injection, Secondary has J_A,J_B in ownParams.
+        // fixTypeParamBounds: raw Primary bound (JCIdent) → Primary<J_A,J_B> (JCTypeApply).
         Map<String, String> sources = new LinkedHashMap<>();
         sources.put("bndpkg2/package-info.java", """
                 @fr.thegamerfarmer.jype.annotations.TypeSystem({
@@ -1395,17 +1395,17 @@ class JypeProcessorTest {
                     protected J_A item;
                 }
                 """);
-        // Master extends Base (raw abstract all-managed) → gets J_A, J_B injected
-        sources.put("bndpkg2/Master.java", """
+        // Primary extends Base (raw abstract all-managed) → gets J_A, J_B injected
+        sources.put("bndpkg2/Primary.java", """
                 package bndpkg2;
-                public abstract class Master extends Base {
+                public abstract class Primary extends Base {
                 }
                 """);
-        // Sub<M extends Master> — M's bound is raw; after Sub gets J_A,J_B,
-        // fixTypeParamBounds should convert "Master" → "Master<J_A,J_B>"
-        sources.put("bndpkg2/Sub.java", """
+        // Secondary<M extends Primary> — M's bound is raw; after Secondary gets J_A,J_B,
+        // fixTypeParamBounds should convert "Primary" → "Primary<J_A,J_B>"
+        sources.put("bndpkg2/Secondary.java", """
                 package bndpkg2;
-                public abstract class Sub<M extends Master> {
+                public abstract class Secondary<M extends Primary> {
                 }
                 """);
         JypeTestCompiler.compile(sources).assertSuccess();

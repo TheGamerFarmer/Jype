@@ -97,7 +97,7 @@ arguments or overridden bounds still produce errors. Missing ordinary arguments,
 extra arguments and code outside a valid type system retain Java diagnostics.
 
 Cast analysis accounts for concrete aliases: a cast such as
-`(API_PLAYER) new APIPlayer()` does not receive a false `ClassCastException`
+`(ApiEntity) new AbstractEntity()` does not receive a false `ClassCastException`
 warning if the operand's type is assignable to the declared bound. The
 adaptation affects only the data-flow inspection of the cast type, not its
 other diagnostics. Genuine generic parameters, ordinary Java classes, and
@@ -106,10 +106,37 @@ casts to a narrower bound are not exempt.
 In a valid caller type system, managed arguments of Jype library types are
 supplied automatically in fields, method signatures, local types and nested
 generic applications. Java member resolution receives the complete substitution:
-an `APIUHC` variable can return `PLAYER` or `List<PLAYER>` through inherited
+a `LibCore` variable can return `ENTITY` or `List<ENTITY>` through inherited
 methods, rather than their raw erasures. Views of inherited non-generic methods
 and fields also support abbreviated source inheritance. User declarations,
 accessibility and ordinary method parameters remain under Java's control.
+
+As in the engine, an alias whose binding is a class without type parameters
+*is* that class in a class that names no alias: in a consumer overriding
+`ENTITY` and `KIND` with `ImplAlpha` and `ImplBeta`, `item.getKind()` is an
+`ImplBeta`, so `instanceof Tag`, `Map<String, ImplBeta>.put(...)` or
+`this.item = item` are accepted. Template bindings (an inherited
+`J_STORE` bound to the library's `StoreBase`) and classes that name
+aliases themselves keep the alias type. A method such as
+`process(ImplAlpha)` or `inject(ImplAlpha)` in a class directly extending or
+implementing a raw Jype parent implements the completed member, as javac sees
+it; the corresponding `@Override` and "must implement" diagnostics are hidden,
+while a genuinely incompatible signature is still reported. Views exist only
+for members whose generic signature raw inheritance would erase; the
+resulting same-erasure clash with the raw inherited member is hidden.
+Completed types are never treated as `var`-like inferred types.
+
+Template aliases (an inherited `J_STORE` bound to `StoreBase`) extend
+their template applied to the system's own bindings, so `store.builder()`
+or `registry.resolve(…).apply(…)` keep their generic types. IntelliJ still
+sees `class ImplAlpha extends ApiAlpha` as raw; an `unchecked` warning is hidden
+only when every call and conversion it concerns is valid **without** unchecked
+conversion once raw Jype parents are completed (`super(item)`,
+`super.inject(item)`, passing `this` or `new Collection()` where
+`Contract<…>` is expected). A cast written without arguments, such as
+`(LibCore) plugin`, is a checked cast to a raw type and is not reported either.
+Other unchecked casts, raw values written by the user and unrelated raw
+generics keep their warnings.
 
 Raw-reference diagnostics are suppressed only when all omitted arguments are
 managed and a completed substitution satisfies their bounds. Missing ordinary
@@ -119,8 +146,8 @@ valid visible system retain their diagnostics.
 ## Public signatures and documentation
 
 Documentation, quick navigation, completion and parameter help present Jype
-types by their declared name: `PLAYER getPlayer()`, not the caller's concrete
-`BattlePlayer`, and `APIUHC`, not its injected parameter list. Ordinary Java
+types by their declared name: `ENTITY getNode()`, not the caller's concrete
+`ConcreteNode`, and `LibCore`, not its injected parameter list. Ordinary Java
 generics and their bounds remain visible. The documentation keeps Java's
 comment content and provides links to the Jype aliases; both the declaration
 and the containing-class presentation omit technical expansions.
@@ -141,9 +168,9 @@ the implementation's generic signatures.
 
 **Limitations:** virtual classes still model bounds rather than executing every
 compiler transformation. In the supported IntelliJ API, `new` expressions do
-not use the type-element inference hook. Generic methods inherited through an
-abbreviated, raw source superclass also retain Java's raw analysis: projecting
-them as additional methods would introduce erasure clashes. Some recursive
+not use the type-element inference hook. Generic methods (with their own type
+parameters) inherited through an abbreviated, raw source superclass also
+retain Java's raw analysis. Some recursive
 F-bounds and static transformations can consequently differ from javac.
 These paths are not covered by blanket unchecked-warning suppression.
 The build with the engine remains authoritative.

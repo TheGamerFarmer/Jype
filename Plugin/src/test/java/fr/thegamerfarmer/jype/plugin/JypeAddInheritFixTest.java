@@ -26,7 +26,7 @@ public class JypeAddInheritFixTest extends JypeJavaFixture {
 
     public void testMissingInheritanceHighlightsAndQuickFixOpensCompletion() {
         objectSystem("library", "Item");
-        objectSystem("other", "Role");
+        objectSystem("other", "Kind");
         configure("overrides={}");
         String before = myFixture.getFile().getText();
         assertTrue(myFixture.doHighlighting(HighlightSeverity.ERROR).stream()

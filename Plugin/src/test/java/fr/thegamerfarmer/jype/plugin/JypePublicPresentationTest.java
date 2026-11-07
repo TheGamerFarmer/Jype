@@ -9,31 +9,31 @@ import java.util.List;
 /** Public declarations retain alias names, ordinary generics and their documentation. */
 public class JypePublicPresentationTest extends JypeJavaFixture {
     public void testClassAndMemberDocumentationDoNotExpandTechnicalParameters() {
-        objectSystem("api", "PLAYER");
+        objectSystem("api", "ENTITY");
         PsiClass cls = myFixture.addClass("""
                 package api;
                 /** Service documentation. */
-                public class Service<T extends java.util.List<PLAYER>, PLAYER> {
-                    /** Player documentation. */
-                    public java.util.List<PLAYER> players() { return null; }
-                    /** The method's PLAYER is an ordinary parameter. */
-                    public <PLAYER extends Number> PLAYER shadow(PLAYER value) { return value; }
+                public class Service<T extends java.util.List<ENTITY>, ENTITY> {
+                    /** Entity documentation. */
+                    public java.util.List<ENTITY> entities() { return null; }
+                    /** The method's ENTITY is an ordinary parameter. */
+                    public <ENTITY extends Number> ENTITY shadow(ENTITY value) { return value; }
                 }
                 """);
         JypeDocumentationProvider provider = new JypeDocumentationProvider();
         String document = com.intellij.codeInsight.documentation.DocumentationManager
                 .getProviderFromElement(cls).generateDoc(cls, null);
         assertTrue(document, document.contains("Service documentation."));
-        assertTrue(document, document.contains("Service&lt;T extends List&lt;PLAYER&gt;&gt;"));
-        assertFalse(document, document.contains("Service&lt;T extends List&lt;PLAYER&gt;, PLAYER"));
-        PsiMethod method = cls.findMethodsByName("players", false)[0];
+        assertTrue(document, document.contains("Service&lt;T extends List&lt;ENTITY&gt;&gt;"));
+        assertFalse(document, document.contains("Service&lt;T extends List&lt;ENTITY&gt;, ENTITY"));
+        PsiMethod method = cls.findMethodsByName("entities", false)[0];
         document = provider.generateDoc(method, null);
-        assertTrue(document, document.contains("Player documentation."));
-        assertTrue(document, document.contains("List&lt;PLAYER&gt; players()"));
-        assertTrue(document, document.contains("psi_element://api.PLAYER"));
-        assertTrue(provider.getQuickNavigateInfo(method, null).contains("List&lt;PLAYER&gt; players()"));
+        assertTrue(document, document.contains("Entity documentation."));
+        assertTrue(document, document.contains("List&lt;ENTITY&gt; entities()"));
+        assertTrue(document, document.contains("psi_element://api.ENTITY"));
+        assertTrue(provider.getQuickNavigateInfo(method, null).contains("List&lt;ENTITY&gt; entities()"));
         PsiMethod shadow = cls.findMethodsByName("shadow", false)[0];
-        assertTrue(provider.generateDoc(shadow, null).contains("&lt;PLAYER extends Number&gt; PLAYER shadow(PLAYER value)"));
+        assertTrue(provider.generateDoc(shadow, null).contains("&lt;ENTITY extends Number&gt; ENTITY shadow(ENTITY value)"));
     }
 
     public void testOrdinaryJavaKeepsItsDefaultDocumentation() {
@@ -44,31 +44,31 @@ public class JypePublicPresentationTest extends JypeJavaFixture {
     }
 
     public void testArrayWildcardAndOrdinaryBoundsPresentation() {
-        objectSystem("api", "PLAYER");
+        objectSystem("api", "ENTITY");
         PsiClass cls = myFixture.addClass("""
                 package api;
-                public class Box<T, PLAYER> {
-                    public java.util.List<? extends PLAYER>[] values;
+                public class Box<T, ENTITY> {
+                    public java.util.List<? extends ENTITY>[] values;
                     public <X extends Number & Comparable<X>> X convert(X... values)
                             throws IllegalArgumentException { return null; }
                 }
                 """);
-        assertEquals("List<? extends PLAYER>[]", JypePublicPresentation.type(cls.getFields()[0].getType()));
+        assertEquals("List<? extends ENTITY>[]", JypePublicPresentation.type(cls.getFields()[0].getType()));
         String signature = JypePublicPresentation.signature(cls.findMethodsByName("convert", false)[0]);
         assertTrue(signature, signature.contains("<X extends Number & Comparable<X>> X convert(X... values)"));
         assertTrue(signature, signature.endsWith("throws IllegalArgumentException"));
         String document = new JypeDocumentationProvider().generateDoc(cls.getFields()[0], null);
         assertTrue(document, document.contains(DocumentationMarkup.DEFINITION_START));
-        assertTrue(document, document.contains("List&lt;? extends PLAYER&gt;[] values"));
+        assertTrue(document, document.contains("List&lt;? extends ENTITY&gt;[] values"));
     }
 
     public void testCompletionUsesPublicParametersAndKeepsInsertion() {
-        objectSystem("api", "PLAYER");
+        objectSystem("api", "ENTITY");
         myFixture.addClass("""
                 package api;
-                public class Service<PLAYER> {
-                    public PLAYER accept(PLAYER player) { return player; }
-                    public PLAYER acceptAll(PLAYER player) { return player; }
+                public class Service<ENTITY> {
+                    public ENTITY accept(ENTITY value) { return value; }
+                    public ENTITY acceptAll(ENTITY value) { return value; }
                 }
                 """);
         PsiFile file = myFixture.addFileToProject("api/Consumer.java", """
@@ -82,8 +82,8 @@ public class JypePublicPresentationTest extends JypeJavaFixture {
             var item = Arrays.stream(items).filter(value -> value.getLookupString().equals("accept")).findFirst().orElseThrow();
             var presentation = new com.intellij.codeInsight.lookup.LookupElementPresentation();
             item.renderElement(presentation);
-            assertEquals("PLAYER", presentation.getTypeText());
-            assertEquals("(PLAYER player)", presentation.getTailText());
+            assertEquals("ENTITY", presentation.getTypeText());
+            assertEquals("(ENTITY value)", presentation.getTailText());
             var expensive = item.getExpensiveRenderer();
             assertNotNull(expensive);
         } else {
@@ -92,12 +92,12 @@ public class JypePublicPresentationTest extends JypeJavaFixture {
     }
 
     public void testParameterInfoKeepsAllJypeOverloadsAndOrdinaryArguments() {
-        objectSystem("api", "PLAYER");
+        objectSystem("api", "ENTITY");
         myFixture.addClass("""
                 package api;
-                public class Service<PLAYER> {
-                    public void accept(PLAYER value) {}
-                    public void accept(PLAYER value, int count) {}
+                public class Service<ENTITY> {
+                    public void accept(ENTITY value) {}
+                    public void accept(ENTITY value, int count) {}
                 }
                 """);
         PsiFile file = myFixture.addFileToProject("api/Consumer.java", """
@@ -107,7 +107,7 @@ public class JypePublicPresentationTest extends JypeJavaFixture {
         PsiMethodCallExpression call = com.intellij.psi.util.PsiTreeUtil.findChildOfType(file, PsiMethodCallExpression.class);
         var candidates = JypeParameterInfoHandler.candidates(call.getArgumentList());
         assertEquals(2, candidates.size());
-        assertTrue(candidates.stream().anyMatch(candidate -> candidate.parameters().equals(List.of("PLAYER value"))));
-        assertTrue(candidates.stream().anyMatch(candidate -> candidate.parameters().equals(List.of("PLAYER value", "int count"))));
+        assertTrue(candidates.stream().anyMatch(candidate -> candidate.parameters().equals(List.of("ENTITY value"))));
+        assertTrue(candidates.stream().anyMatch(candidate -> candidate.parameters().equals(List.of("ENTITY value", "int count"))));
     }
 }

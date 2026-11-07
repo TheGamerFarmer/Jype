@@ -19,8 +19,8 @@ dependency or installing the IDE plugin alone does not activate compilation.
 ```java
 // api/package-info.java
 @TypeSystem({
-    @TypeDef(name = "PLAYER", bound = Player.class),
-    @TypeDef(name = "GROUP", bound = Group.class)
+    @TypeDef(name = "ENTITY", bound = Entity.class),
+    @TypeDef(name = "CLUSTER", bound = Cluster.class)
 })
 package api;
 
@@ -29,21 +29,21 @@ import fr.thegamerfarmer.jype.annotations.TypeSystem;
 ```
 
 ```java
-// api/Player.java
+// api/Entity.java
 package api;
 
-public abstract class Player {
-    public GROUP group;
-    public abstract PLAYER self();
+public abstract class Entity {
+    public CLUSTER cluster;
+    public abstract ENTITY self();
 }
 ```
 
 ```java
-// api/Group.java
+// api/Cluster.java
 package api;
 
-public abstract class Group {
-    public java.util.List<PLAYER> members;
+public abstract class Cluster {
+    public java.util.List<ENTITY> members;
 }
 ```
 
@@ -52,45 +52,45 @@ class's missing parameters. Definition order is preserved. Here, both classes
 become two-parameter templates:
 
 ```java
-abstract class Player<
-    PLAYER extends Player<PLAYER, GROUP>,
-    GROUP extends Group<PLAYER, GROUP>> { /* members preserved */ }
+abstract class Entity<
+    ENTITY extends Entity<ENTITY, CLUSTER>,
+    CLUSTER extends Cluster<ENTITY, CLUSTER>> { /* members preserved */ }
 ```
 
-These **F-bounds** describe a coherent family: the bound of `PLAYER` refers to
-both `PLAYER` and `GROUP`. The engine therefore propagates dependencies until
+These **F-bounds** describe a coherent family: the bound of `ENTITY` refers to
+both `ENTITY` and `CLUSTER`. The engine therefore propagates dependencies until
 they stabilize rather than scanning the files only once. Bounds explicitly
 written by the user are preserved.
 
 ## Inheriting and overriding mappings
 
 ```java
-// game/package-info.java
+// impl/package-info.java
 @TypeSystem(
     inherit = "api",
     overrides = {
-        @TypeDef(name = "PLAYER", bound = GamePlayer.class),
-        @TypeDef(name = "GROUP", bound = GameGroup.class)
+        @TypeDef(name = "ENTITY", bound = AppEntity.class),
+        @TypeDef(name = "CLUSTER", bound = AppCluster.class)
     }
 )
-package game;
+package impl;
 
 import fr.thegamerfarmer.jype.annotations.TypeDef;
 import fr.thegamerfarmer.jype.annotations.TypeSystem;
 ```
 
 ```java
-package game;
+package impl;
 
-public final class GamePlayer extends api.Player {
-    @Override public GamePlayer self() { return this; }
+public final class AppEntity extends api.Entity {
+    @Override public AppEntity self() { return this; }
 }
 ```
 
 ```java
-package game;
+package impl;
 
-public final class GameGroup extends api.Group {}
+public final class AppCluster extends api.Cluster {}
 ```
 
 Raw clauses are completed with the package's concrete mappings. `@TypeSystem`
@@ -112,6 +112,14 @@ Rules:
 - Without a local annotation, a class can also inherit the type system of its
   source superclass or a metadata-bearing compiled superclass. A consumer
   defining new mappings still declares `inherit` and `overrides` on its package.
+- In a consumer with `overrides`, names it does not override whose inherited
+  bound is still a generic library template (for example an inherited
+  `J_STORE` bound to `StoreBase`) remain the only technical parameters.
+  Local bindings, abstract classes, and leaves are specialized with them
+  (`AppEntity` becomes `AppEntity<J_STORE>` extending
+  `ApiEntity<AppEntity<J_STORE>, …, J_STORE>`), so `ENTITY` really
+  means `AppEntity` in that package. Static members only receive those residual
+  parameters. Javadoc and public views still show `AppEntity`.
 
 ## Ordinary parameters, partial ownership, and references
 
@@ -120,16 +128,16 @@ Unmanaged parameters remain under the programmer's control:
 ```java
 package api;
 
-public abstract class Listener<PLAYER, GROUP, E> {
-    public abstract void accept(PLAYER player, E event);
+public abstract class Listener<ENTITY, CLUSTER, E> {
+    public abstract void accept(ENTITY entity, E event);
 }
 
 // In another class in the same type system:
-abstract class ClickListener<PLAYER, GROUP> extends Listener<ClickEvent> {}
+abstract class ClickListener<ENTITY, CLUSTER> extends Listener<ClickEvent> {}
 ```
 
-The `ClickEvent` argument remains in the `E` position; Jype fills the `PLAYER`
-and `GROUP` positions. An invalid number of arguments is not "fixed" by
+The `ClickEvent` argument remains in the `E` position; Jype fills the `ENTITY`
+and `CLUSTER` positions. An invalid number of arguments is not "fixed" by
 removing user-supplied arguments.
 
 Completion also reads the generic signatures of separately compiled classes
@@ -160,8 +168,8 @@ Completion covers, among other cases:
 | Nested wildcards | Missing arguments completed when their declaration is known |
 | Imports | Explicit imports, wildcard imports, and member types; no arbitrary choice when ambiguous |
 
- A method parameter such as `<PLAYER>` shadows the class's managed name.
-A **value** identifier named `PLAYER`, or a qualified class `other.PLAYER`, must
+ A method parameter such as `<ENTITY>` shadows the class's managed name.
+A **value** identifier named `ENTITY`, or a qualified class `other.ENTITY`, must
 not trigger parameter injection. Ordinary generics and genuine raw usages
 without managed context remain normal Java constructs; Jype does not replace
 javac inference.
@@ -182,10 +190,10 @@ Neither annotation is runtime-retained or changes binary method signatures.
 Unsupported versions or inconsistent metadata fail explicitly rather than
 silently hiding Java parameters.
 
-The public signature remains `PLAYER getPlayer()` or `List<PLAYER>`, even when
-the caller's effective mapping is `BattlePlayer`. That spelling describes the
+The public signature remains `ENTITY getNode()` or `List<ENTITY>`, even when
+the caller's effective mapping is `ConcreteNode`. That spelling describes the
 declaration; compilation still checks the caller's concrete type. Ordinary
-method parameters such as `<PLAYER extends Number>` that shadow an alias remain
+method parameters such as `<ENTITY extends Number>` that shadow an alias remain
 ordinary generics. Older JARs remain usable through package metadata and JVM
 signatures where the existing rules establish ownership; recompilation provides
 precise declaration origins.
@@ -197,11 +205,11 @@ package api;
 
 public class Registry {
     @lombok.Getter @lombok.Setter
-    private static java.util.Map<String, PLAYER> players =
+    private static java.util.Map<String, ENTITY> entities =
         new java.util.HashMap<>();
 
-    static PLAYER first(PLAYER fallback) {
-        return players.getOrDefault("first", fallback);
+    static ENTITY first(ENTITY fallback) {
+        return entities.getOrDefault("first", fallback);
     }
 }
 ```
@@ -279,7 +287,12 @@ Shared ordinary parameters omitted in abbreviated inheritance are restored:
 when `Generic` declares `<A, B>`. These are ordinary Java parameters, not
 technical slots to hide.
 
-Documentary alias interfaces, such as `PLAYER`, provide real Javadoc links.
+Documentary alias interfaces, such as `ENTITY`, provide real Javadoc links.
+Source copies are reserved before aliases are written. If an alias differs
+from a declaration only by case (for example `MARK` and `Mark`), the alias is
+placed in a separate documentary package and imported into the copies. This
+avoids filename collisions on case-insensitive filesystems while keeping
+`MARK` visible in signatures and preserving its documentation link.
 Metadata-bearing compiled ancestors and referenced managed types receive
 doc-only declaration shells so their internal signatures do not leak into
 hierarchy and inherited-member sections. Dependency shells cannot recover
@@ -296,6 +309,22 @@ The engine generates sources, not HTML: run the standard Javadoc tool over
 these copies to publish documentation.
 
 ## Diagnostics
+
+Parameters injected after Enter receive Java's implicit `Object` upper bound
+before their symbols become visible to other classes. The following injection
+pass replaces this initial bound with the effective Jype bound; cross-class
+bound inspection must not depend on source processing order.
+
+A template whose alias is overridden by a concrete subclass of a self-bounded
+generic hierarchy keeps the ancestor's recursive bound. An unrelated generic
+ancestor is not a replacement for the configured bound: a manager extending a
+shared base still requires the manager contract, not just that base contract.
+Source binding classes inheriting an abbreviated local template also acquire
+its parameters instead of leaving inherited collections erased.
+
+Contextual instance arguments are not inserted inside `java.lang.Class` type
+tokens. Reflection APIs taking `SomeType.class` operate on the runtime class,
+not on a reified version of its Jype arguments.
 
 | Symptom | Check |
 |---|---|

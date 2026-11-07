@@ -23,7 +23,7 @@ does not depend on IntelliJ. When an IDE diagnostic differs from the compilation
 result, the javac build with Jype is the reference.
 
 Jype's public view keeps the names declared by `@TypeDef`: a signature remains
-`PLAYER getPlayer()` even when a consuming project overrides `PLAYER` with a
+`ENTITY getNode()` even when a consuming project overrides `ENTITY` with a
 concrete class. Technical parameters are used internally for Java's type
 checking, not as arguments that consumers must repeat. The IntelliJ integration
 reads library metadata to present those declarations without the injected
@@ -79,7 +79,7 @@ updates on each Maven invocation.
 does not enable it in Maven either. Every module compiling Jype sources,
 including a consumer of a separately compiled Jype library, needs the
 dependency on its compile classpath, the javac plugin, and the annotation
-processor. A raw or partial superclass such as `APISubPower<MASTER_POWER>`
+processor. A raw or partial superclass such as `AbstractSecondary<PARENT>`
 relies on these transformations to supply the managed type arguments.
 
 ### Activate the compiler
@@ -212,15 +212,15 @@ install the matching updated ZIP or Marketplace release, then restart the IDE.
 
 ```java
 @TypeSystem({
-    @TypeDef(name = "Player", bound = PlayerBase.class),
-    @TypeDef(name = "Team", bound = TeamBase.class)
+    @TypeDef(name = "Entity", bound = EntityBase.class),
+    @TypeDef(name = "Group", bound = GroupBase.class)
 })
-package example.game;
+package example.app;
 
 import fr.thegamerfarmer.jype.annotations.TypeDef;
 import fr.thegamerfarmer.jype.annotations.TypeSystem;
-import example.model.PlayerBase;
-import example.model.TeamBase;
+import example.model.EntityBase;
+import example.model.GroupBase;
 ```
 
 Bounds must be accessible Java classes or interfaces. Names must be valid Java
@@ -228,23 +228,23 @@ identifiers; no particular prefix is required. In this package and its
 subpackages, you can write:
 
 ```java
-package example.game;
+package example.app;
 
-public class Match {
-    private Player player;
-    private Team team;
+public class Instance {
+    private Entity entity;
+    private Group group;
 
-    public Player getPlayer() {
-        return player;
+    public Entity getEntity() {
+        return entity;
     }
 
-    public Team getTeam() {
-        return team;
+    public Group getGroup() {
+        return group;
     }
 }
 ```
 
-`Player` and `Team` are not new Java files to create. The engine represents these
+`Entity` and `Group` are not new Java files to create. The engine represents these
 names as bounded generic parameters and completes their usages according to the
 visible type system. The accessible members are those of the bound: to call a
 method specific to a subtype, an appropriate bound or a justified Java cast is
@@ -256,14 +256,14 @@ A type system can reuse definitions from another package:
 
 ```java
 @TypeSystem(
-    inherit = "example.game",
-    overrides = @TypeDef(name = "Player", bound = RankedPlayer.class)
+    inherit = "example.app",
+    overrides = @TypeDef(name = "Entity", bound = RankedEntity.class)
 )
-package example.ranked;
+package example.advanced;
 
 import fr.thegamerfarmer.jype.annotations.TypeDef;
 import fr.thegamerfarmer.jype.annotations.TypeSystem;
-import example.model.RankedPlayer;
+import example.model.RankedEntity;
 ```
 
 An override replaces a bound without requiring the new bound to be a subtype of

@@ -57,6 +57,8 @@
         implementationClass="fr.thegamerfarmer.jype.plugin.JypeCastInspectionSuppressor"/>
     <lang.inspectionSuppressor language="JAVA"
         implementationClass="fr.thegamerfarmer.jype.plugin.JypeRawTypeInspectionSuppressor"/>
+    <lang.inspectionSuppressor language="JAVA"
+        implementationClass="fr.thegamerfarmer.jype.plugin.JypeUncheckedInspectionSuppressor"/>
 
     <java.elementFinder
         implementation="fr.thegamerfarmer.jype.plugin.JypePsiElementFinder"

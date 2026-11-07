@@ -8,40 +8,40 @@ import java.util.Map;
 /** Canonical identity, package inheritance and resolve-scope isolation. */
 public class JypeTypeSystemTest extends JypeJavaFixture {
     public void testNamesAreDeclaredNotGuessedAndVirtualIdentityIsShared() {
-        objectSystem("managed", "Player2");
+        objectSystem("managed", "TypeTwo");
         JypePsiElementFinder finder = new JypePsiElementFinder(getProject());
-        PsiClass canonical = finder.findClass("managed.Player2", scope());
+        PsiClass canonical = finder.findClass("managed.TypeTwo", scope());
         assertNotNull(canonical);
-        assertNull(finder.findClass("Player2", scope()));
-        assertNull(finder.findClass("unrelated.Player2", scope()));
+        assertNull(finder.findClass("TypeTwo", scope()));
+        assertNull(finder.findClass("unrelated.TypeTwo", scope()));
         assertNull(finder.findClass("managed.API_FAKE", scope()));
-        PsiClass fromShortNames = new JypeShortNamesCache(getProject()).getClassesByName("Player2", scope())[0];
+        PsiClass fromShortNames = new JypeShortNamesCache(getProject()).getClassesByName("TypeTwo", scope())[0];
         assertSame(canonical, fromShortNames);
     }
 
     public void testVirtualIdentityDoesNotDependOnLookupScope() {
-        objectSystem("managed", "API_ROLE");
+        objectSystem("managed", "J_B");
         PsiClass owner = myFixture.addClass("package managed; public class Owner {}");
         JypePsiElementFinder finder = new JypePsiElementFinder(getProject());
-        PsiClass global = finder.findClass("managed.API_ROLE", scope());
-        PsiClass module = finder.findClass("managed.API_ROLE", owner.getResolveScope());
+        PsiClass global = finder.findClass("managed.J_B", scope());
+        PsiClass module = finder.findClass("managed.J_B", owner.getResolveScope());
         assertNotNull(global);
         assertSame("Lookup scope must not create another Java type", global, module);
         assertTrue(com.intellij.psi.search.PsiSearchScopeUtil.isInScope(owner.getResolveScope(), global));
     }
 
     public void testQualifiedAndWildcardReferencesShareCanonicalType() {
-        objectSystem("managed", "API_ROLE");
+        objectSystem("managed", "J_B");
         PsiFile file = myFixture.addFileToProject("managed/deep/Consumer.java", """
                 package managed.deep;
                 import managed.*;
                 public class Consumer {
-                    API_ROLE role;
-                    managed.API_ROLE qualified;
+                    J_B item;
+                    managed.J_B qualified;
                 }
                 """);
         PsiClass cls = ((PsiJavaFile) file).getClasses()[0];
-        PsiClass canonical = new JypePsiElementFinder(getProject()).findClass("managed.API_ROLE", scope());
+        PsiClass canonical = new JypePsiElementFinder(getProject()).findClass("managed.J_B", scope());
         assertNotNull(canonical);
         for (PsiField field : cls.getFields()) {
             assertSame(canonical, ((PsiClassType) field.getType()).resolve());

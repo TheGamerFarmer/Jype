@@ -192,12 +192,22 @@ class TypeInjectionPass {
             make.at(typeParam.pos);
 
             List<? extends TypeParameterElement> boundTypeParams = boundElement.getTypeParameters();
-            if (boundTypeParams.isEmpty()) {
-                // A concrete binding of an F-bounded hierarchy must not narrow generic templates.
-                if (hasManagedGenericSupertype(boundElement, resolvedTypes.keySet(), new HashSet<>())) continue;
-                typeParam.bounds = com.sun.tools.javac.util.List.of(make.QualIdent(sym));
-                JypeAstUtils.setTypeVarBound((Type.TypeVar) tpe.asType(), sym.type);
-                continue;
+            boolean specializedBinding = !boundTypeParams.isEmpty() && boundTypeParams.stream()
+                    .allMatch(parameter -> resolvedTypes.containsKey(parameter.getSimpleName().toString())
+                            && !parameter.getSimpleName().contentEquals(paramName));
+            if (boundTypeParams.isEmpty() || specializedBinding) {
+                // Keep the recursive contract without narrowing a template to its concrete binding.
+                TypeElement genericContract = managedGenericSupertype(
+                        boundElement, paramName, new HashSet<>());
+                if (genericContract == null && specializedBinding) continue;
+                if (genericContract == null) {
+                    typeParam.bounds = com.sun.tools.javac.util.List.of(make.QualIdent(sym));
+                    JypeAstUtils.setTypeVarBound((Type.TypeVar) tpe.asType(), sym.type);
+                    continue;
+                }
+                boundElement = genericContract;
+                sym = (Symbol.ClassSymbol) boundElement;
+                boundTypeParams = boundElement.getTypeParameters();
             }
 
             // If this class does not yet own some Jype parameters of the bound class,
@@ -229,16 +239,22 @@ class TypeInjectionPass {
         }
     }
 
-    private boolean hasManagedGenericSupertype(TypeElement element, Set<String> managed, Set<TypeElement> visited) {
-        if (!visited.add(element)) return false;
-        List<TypeMirror> parents = new ArrayList<>(element.getInterfaces());
+    private TypeElement managedGenericSupertype(TypeElement element, String parameterName, Set<TypeElement> visited) {
+        if (!visited.add(element)) return null;
+        List<TypeMirror> parents = new ArrayList<>();
         parents.add(element.getSuperclass());
+        parents.addAll(element.getInterfaces());
         for (TypeMirror parent : parents) {
             if (!(parent instanceof DeclaredType declared) || !(declared.asElement() instanceof TypeElement type)) continue;
-            if (type.getTypeParameters().stream().anyMatch(parameter -> managed.contains(parameter.getSimpleName().toString()))
-                    || hasManagedGenericSupertype(type, managed, visited)) return true;
+            for (TypeParameterElement parameter : type.getTypeParameters()) {
+                if (!parameter.getSimpleName().contentEquals(parameterName)) continue;
+                Type upperBound = ((Type.TypeVar) parameter.asType()).getUpperBound();
+                if (upperBound != null && upperBound.tsym == type) return type;
+            }
+            TypeElement inherited = managedGenericSupertype(type, parameterName, visited);
+            if (inherited != null) return inherited;
         }
-        return false;
+        return null;
     }
 
     /**

@@ -18,8 +18,8 @@ public class JypeAnnotationCompletionTest extends JypeJavaFixture {
 
     private void parent() {
         define("library", """
-                {@fr.thegamerfarmer.jype.annotations.TypeDef(name="PLAYER", bound=Object.class),
-                 @fr.thegamerfarmer.jype.annotations.TypeDef(name="ROLE", bound=Object.class)}
+                {@fr.thegamerfarmer.jype.annotations.TypeDef(name="J_A", bound=Object.class),
+                 @fr.thegamerfarmer.jype.annotations.TypeDef(name="J_B", bound=Object.class)}
                 """);
     }
 
@@ -67,13 +67,13 @@ public class JypeAnnotationCompletionTest extends JypeJavaFixture {
         parent();
         var names = complete("""
                 inherit="library", overrides=
-                    @fr.thegamerfarmer.jype.annotations.TypeDef(name="P<caret>bad", bound=Object.class)
+                    @fr.thegamerfarmer.jype.annotations.TypeDef(name="J<caret>bad", bound=Object.class)
                 """);
         if (myFixture.getLookup() != null) {
-            assertContainsElements(names, "PLAYER");
+            assertContainsElements(names, "J_A");
             myFixture.finishLookup(Lookup.NORMAL_SELECT_CHAR);
         }
-        assertTrue(myFixture.getFile().getText(), myFixture.getFile().getText().contains("name=\"PLAYER\""));
+        assertTrue(myFixture.getFile().getText(), myFixture.getFile().getText().contains("name=\"J_A\""));
     }
 
     public void testOverrideSuggestsOnlyInheritedNamesAndExcludesUsedNames() {
@@ -81,14 +81,14 @@ public class JypeAnnotationCompletionTest extends JypeJavaFixture {
         objectSystem("other", "UNRELATED");
         var names = complete("""
                 inherit="library", overrides={
-                    @fr.thegamerfarmer.jype.annotations.TypeDef(name="PLAYER", bound=String.class),
+                    @fr.thegamerfarmer.jype.annotations.TypeDef(name="J_A", bound=String.class),
                     @fr.thegamerfarmer.jype.annotations.TypeDef(name="<caret>", bound=Object.class)
                 }
                 """);
         // IntelliJ may insert the single available candidate directly.
-        assertTrue(names.toString(), names.contains("ROLE")
-                || myFixture.getFile().getText().contains("name=\"ROLE\""));
-        assertFalse(names.toString(), names.contains("PLAYER"));
+        assertTrue(names.toString(), names.contains("J_B")
+                || myFixture.getFile().getText().contains("name=\"J_B\""));
+        assertFalse(names.toString(), names.contains("J_A"));
         assertFalse(names.toString(), names.contains("UNRELATED"));
     }
 
@@ -99,7 +99,7 @@ public class JypeAnnotationCompletionTest extends JypeJavaFixture {
                 inherit="derived", overrides=
                     @fr.thegamerfarmer.jype.annotations.TypeDef(name="<caret>", bound=Object.class)
                 """);
-        assertContainsElements(names, "PLAYER", "ROLE");
+        assertContainsElements(names, "J_A", "J_B");
     }
 
     public void testStandaloneDefinitionsDoNotSuggestOverrideNames() {
@@ -107,8 +107,8 @@ public class JypeAnnotationCompletionTest extends JypeJavaFixture {
         var names = complete("""
                 {@fr.thegamerfarmer.jype.annotations.TypeDef(name="<caret>", bound=Object.class)}
                 """);
-        assertFalse(names.toString(), names.contains("PLAYER"));
-        assertFalse(names.toString(), names.contains("ROLE"));
+        assertFalse(names.toString(), names.contains("J_A"));
+        assertFalse(names.toString(), names.contains("J_B"));
     }
 
     public void testUnknownParentHasNoOverrideSuggestions() {
@@ -117,7 +117,7 @@ public class JypeAnnotationCompletionTest extends JypeJavaFixture {
                 inherit="absent", overrides=
                     @fr.thegamerfarmer.jype.annotations.TypeDef(name="<caret>", bound=Object.class)
                 """);
-        assertFalse(names.toString(), names.contains("PLAYER"));
+        assertFalse(names.toString(), names.contains("J_A"));
     }
 
     public void testAbsentParentHasNoOverrideSuggestions() {
@@ -135,8 +135,8 @@ public class JypeAnnotationCompletionTest extends JypeJavaFixture {
     }
 
     public void testImportedAnnotationsAndQualifiedPackagePrefix() {
-        objectSystem("fr.example.api", "PLAYER");
-        objectSystem("fr.example.other", "ROLE");
+        objectSystem("fr.example.api", "J_A");
+        objectSystem("fr.example.other", "J_B");
         myFixture.addFileToProject("fr/example/ordinary/Ordinary.java",
                 "package fr.example.ordinary; class Ordinary {}");
         var file = myFixture.addFileToProject("consumer/package-info.java", """
@@ -155,14 +155,14 @@ public class JypeAnnotationCompletionTest extends JypeJavaFixture {
         parent();
         var file = myFixture.addFileToProject("consumer/package-info.java", """
                 @TypeSystem(inherit="library", overrides={
-                    @TypeDef(name="PLAYER<caret>", bound=Object.class)
+                    @TypeDef(name="J_A<caret>", bound=Object.class)
                 })
                 package consumer;
                 import fr.thegamerfarmer.jype.annotations.*;
                 """);
         myFixture.configureFromExistingVirtualFile(file.getVirtualFile());
         myFixture.complete(CompletionType.BASIC);
-        assertTrue(myFixture.getFile().getText(), myFixture.getFile().getText().contains("name=\"PLAYER\""));
+        assertTrue(myFixture.getFile().getText(), myFixture.getFile().getText().contains("name=\"J_A\""));
     }
 
     public void testImportedOverrideArrayOffersOnlyInheritedNames() {
@@ -178,7 +178,7 @@ public class JypeAnnotationCompletionTest extends JypeJavaFixture {
         myFixture.configureFromExistingVirtualFile(file.getVirtualFile());
         var variants = myFixture.complete(CompletionType.BASIC);
         assertNotNull(variants);
-        assertSameElements(Arrays.stream(variants).map(LookupElement::getLookupString).toList(), "PLAYER", "ROLE");
+        assertSameElements(Arrays.stream(variants).map(LookupElement::getLookupString).toList(), "J_A", "J_B");
     }
 
     public void testStandaloneNameDoesNotOfferWordsAlreadyDeclaredInFile() {
@@ -195,11 +195,11 @@ public class JypeAnnotationCompletionTest extends JypeJavaFixture {
     public void testOverrideDoesNotExcludeNamesInValueArray() {
         parent();
         var names = complete("""
-                value={@fr.thegamerfarmer.jype.annotations.TypeDef(name="PLAYER", bound=Object.class)},
+                value={@fr.thegamerfarmer.jype.annotations.TypeDef(name="J_A", bound=Object.class)},
                 inherit="library", overrides={
                     @fr.thegamerfarmer.jype.annotations.TypeDef(name="<caret>", bound=Object.class)
                 }
                 """);
-        assertContainsElements(names, "PLAYER", "ROLE");
+        assertContainsElements(names, "J_A", "J_B");
     }
 }

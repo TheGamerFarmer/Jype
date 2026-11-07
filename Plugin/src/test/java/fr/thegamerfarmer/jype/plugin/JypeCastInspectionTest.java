@@ -5,19 +5,19 @@ import com.intellij.psi.*;
 
 /** Bound-safe alias casts without suppressing real Java data-flow failures. */
 public class JypeCastInspectionTest extends JypeJavaFixture {
-    public void testConcreteAliasCastInPlayerConstructorLambda() {
-        myFixture.addClass("package bounds; public class APIPlayer {}");
+    public void testConcreteAliasCastInSupplierLambda() {
+        myFixture.addClass("package bounds; public class BoundType {}");
         define("managed",
-                "{@fr.thegamerfarmer.jype.annotations.TypeDef(name=\"API_PLAYER\", bound=bounds.APIPlayer.class)}");
-        myFixture.configureByText("APIUHC.java", """
+                "{@fr.thegamerfarmer.jype.annotations.TypeDef(name=\"J_TYPE\", bound=bounds.BoundType.class)}");
+        myFixture.configureByText("LibCore.java", """
                 package managed;
-                import bounds.APIPlayer;
-                class APIUHC {
-                    static class PlayerManager {
-                        void setPlayerConstructor(java.util.function.Supplier<API_PLAYER> constructor) {}
+                import bounds.BoundType;
+                class LibCore {
+                    static class Factory {
+                        void setFactory(java.util.function.Supplier<J_TYPE> constructor) {}
                     }
-                    void activeAPIUHC(PlayerManager manager) {
-                        manager.setPlayerConstructor(() -> (API_PLAYER) new APIPlayer());
+                    void configure(Factory factory) {
+                        factory.setFactory(() -> (J_TYPE) new BoundType());
                     }
                 }
                 """);
@@ -32,22 +32,22 @@ public class JypeCastInspectionTest extends JypeJavaFixture {
     }
 
     public void testDangerousCastsAndNullDereferencesAreStillReported() {
-        myFixture.addClass("package bounds; public class APIPlayer {}");
-        myFixture.addClass("package bounds; public class Child extends APIPlayer {}");
+        myFixture.addClass("package bounds; public class BoundType {}");
+        myFixture.addClass("package bounds; public class ChildType extends BoundType {}");
         define("managed",
-                "{@fr.thegamerfarmer.jype.annotations.TypeDef(name=\"API_PLAYER\", bound=bounds.Child.class)}");
+                "{@fr.thegamerfarmer.jype.annotations.TypeDef(name=\"J_TYPE\", bound=bounds.ChildType.class)}");
         myFixture.configureByText("Consumer.java", """
                 package managed;
-                import bounds.APIPlayer;
+                import bounds.BoundType;
                 class Consumer {
-                    Object alias() { return (API_PLAYER) new APIPlayer(); }
-                    Object real() { return (bounds.Child) new APIPlayer(); }
-                    <API_PLAYER extends APIPlayer> Object parameter() {
-                        return (API_PLAYER) new APIPlayer();
+                    Object alias() { return (J_TYPE) new BoundType(); }
+                    Object real() { return (bounds.ChildType) new BoundType(); }
+                    <J_TYPE extends BoundType> Object parameter() {
+                        return (J_TYPE) new BoundType();
                     }
                     int nullValue() {
-                        API_PLAYER player = null;
-                        return player.hashCode();
+                        J_TYPE item = null;
+                        return item.hashCode();
                     }
                 }
                 """);

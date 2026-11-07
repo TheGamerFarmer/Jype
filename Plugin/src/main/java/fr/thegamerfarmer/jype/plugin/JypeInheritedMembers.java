@@ -37,10 +37,13 @@ final class JypeInheritedMembers {
                 if (method.isConstructor() || method.hasTypeParameters()
                         || nameHint != null && !nameHint.equals(method.getName())
                         || method.hasModifierProperty(PsiModifier.PRIVATE)
+                        // An abstract view in a concrete class would hide a missing implementation.
+                        || method.hasModifierProperty(PsiModifier.ABSTRACT) && !owner.isInterface()
+                        && !owner.hasModifierProperty(PsiModifier.ABSTRACT)
                         || !JavaPsiFacade.getInstance(owner.getProject()).getResolveHelper()
                         .isAccessible(method, owner, null)) continue;
                 PsiClass declaring = method.getContainingClass();
-                if (declaring == null) continue;
+                if (declaring == null || !alteredByRawInheritance(declaring, method)) continue;
                 PsiSubstitutor substitution = TypeConversionUtil.getSuperClassSubstitutor(declaring, target, parent);
                 LightMethod view = new LightMethod(owner.getManager(), method, owner, JavaLanguage.INSTANCE, substitution) {
                     @Override
@@ -73,7 +76,7 @@ final class JypeInheritedMembers {
                             .isAccessible(field, owner, null)
                             || extensible.getOwnFields().stream().anyMatch(own -> own.getName().equals(field.getName()))) continue;
                     PsiClass declaring = field.getContainingClass();
-                    if (declaring == null) continue;
+                    if (declaring == null || !declaring.hasTypeParameters() || erased(field.getType())) continue;
                     PsiSubstitutor substitution = TypeConversionUtil.getSuperClassSubstitutor(
                             declaring, target, parent.resolveGenerics().getSubstitutor());
                     LightField view = new LightField(owner.getManager(), field, owner) {
@@ -90,7 +93,62 @@ final class JypeInheritedMembers {
         return result == null ? List.of() : result;
     }
 
-    private static List<PsiClassType> completedParents(PsiClass owner) {
+    /**
+     * Whether a physical method overrides a member of a raw Jype parent once that parent's
+     * technical arguments are completed (javac sees {@code process(ConcreteNode)} implement
+     * {@code process(ENTITY)} with {@code ENTITY = ConcreteNode}; IntelliJ only sees the erased member).
+     *
+     * @param declaringName simple or qualified name the overridden member must be declared in, or {@code null}
+     */
+    static boolean overridesCompletedMember(PsiMethod method, @org.jetbrains.annotations.Nullable String declaringName) {
+        PsiClass owner = method.getContainingClass();
+        if (owner == null || method.isConstructor() || method.hasModifierProperty(PsiModifier.STATIC)) return false;
+        MethodSignature signature = method.getSignature(PsiSubstitutor.EMPTY);
+        Set<PsiClass> visited = new HashSet<>();
+        Deque<PsiClass> pending = new ArrayDeque<>(List.of(owner));
+        while (!pending.isEmpty()) {
+            PsiClass current = pending.poll();
+            if (!visited.add(current)) continue;
+            for (PsiClassType completed : completedParents(current)) {
+                PsiClass target = completed.resolve();
+                if (target == null) continue;
+                PsiSubstitutor parent = completed.resolveGenerics().getSubstitutor();
+                for (PsiMethod candidate : target.findMethodsByName(method.getName(), true)) {
+                    PsiClass declaring = candidate.getContainingClass();
+                    if (declaring == null || candidate.hasModifierProperty(PsiModifier.PRIVATE)
+                            || candidate.hasModifierProperty(PsiModifier.STATIC)
+                            || declaringName != null && !declaringName.equals(declaring.getName())
+                            && !declaringName.equals(declaring.getQualifiedName())) continue;
+                    PsiSubstitutor substitution = TypeConversionUtil.getSuperClassSubstitutor(declaring, target, parent);
+                    if (MethodSignatureUtil.areSignaturesEqual(signature, candidate.getSignature(substitution))) return true;
+                }
+            }
+            for (PsiClass parent : current.getSupers()) {
+                if (!(parent instanceof PsiCompiledElement)) pending.add(parent);
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Raw inheritance only erases members of generic declarations, and only when their signature
+     * mentions generic types. Other members are inherited unchanged; projecting them would only
+     * duplicate them (for example {@code Object.getClass()} would lose its special typing).
+     */
+    private static boolean alteredByRawInheritance(PsiClass declaring, PsiMethod method) {
+        if (!declaring.hasTypeParameters()) return false;
+        if (!erased(method.getReturnType())) return true;
+        for (PsiParameter parameter : method.getParameterList().getParameters()) {
+            if (!erased(parameter.getType())) return true;
+        }
+        return false;
+    }
+
+    private static boolean erased(PsiType type) {
+        return type == null || type.equals(TypeConversionUtil.erasure(type));
+    }
+
+    static List<PsiClassType> completedParents(PsiClass owner) {
         List<PsiClassType> parents = new ArrayList<>();
         parents.addAll(List.of(owner.getExtendsListTypes()));
         parents.addAll(List.of(owner.getImplementsListTypes()));

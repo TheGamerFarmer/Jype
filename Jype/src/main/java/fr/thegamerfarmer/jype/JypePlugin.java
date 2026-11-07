@@ -84,6 +84,12 @@ public final class JypePlugin implements Plugin {
         return transformer.staticSourceEdits();
     }
 
+    void completeMemberTypesAfterInjection(String scope,
+            Map<String, java.util.Set<String>> injectedParameters,
+            Map<String, List<String[]>> originalParameterOrders) {
+        transformer.completeMemberTypesAfterInjection(scope, injectedParameters, originalParameterOrders);
+    }
+
     DeclarationOrigins origins() {
         return transformer.origins;
     }

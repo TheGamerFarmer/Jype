@@ -35,9 +35,9 @@ public class JypeCompiledTypeSystemTest extends JypeJavaFixture {
                             }
                             """,
                     "Bound.java", "package compiled; public class Bound { public int count() { return 1; } }",
-                    "Master.java", "package compiled; public class Master<TYPE extends Bound> {}",
-                    "Sub.java", "package compiled; public abstract class Sub<MASTER_POWER extends Master<TYPE>, "
-                            + "TYPE extends Bound, " + extraParameters + "> { public MASTER_POWER master() { return null; } }",
+                    "Primary.java", "package compiled; public class Primary<TYPE extends Bound> {}",
+                    "Secondary.java", "package compiled; public abstract class Secondary<PARENT extends Primary<TYPE>, "
+                            + "TYPE extends Bound, " + extraParameters + "> { public PARENT primary() { return null; } }",
                     "package-info.java", """
                             @fr.thegamerfarmer.jype.annotations.TypeSystem({
                                 @fr.thegamerfarmer.jype.annotations.TypeDef(name="TYPE", bound=compiled.Bound.class)
@@ -74,19 +74,19 @@ public class JypeCompiledTypeSystemTest extends JypeJavaFixture {
                     ? myFixture.getFile().getText().contains("name=\"TYPE\"")
                     : java.util.Arrays.stream(variants).anyMatch(item -> item.getLookupString().equals("TYPE")));
             define("consumer", "inherit=\"compiled\"");
-            myFixture.addClass("package consumer; public class BGMaster extends compiled.Master {}");
-            PsiFile inheritance = myFixture.addFileToProject("consumer/BGSub.java", """
+            myFixture.addClass("package consumer; public class ImplPrimary extends compiled.Primary {}");
+            PsiFile inheritance = myFixture.addFileToProject("consumer/ImplSecondary.java", """
                     package consumer;
-                    public abstract class BGSub<MASTER_POWER extends BGMaster>
-                            extends compiled.Sub<MASTER_POWER> {
-                        MASTER_POWER power() { return master(); }
+                    public abstract class ImplSecondary<PARENT extends ImplPrimary>
+                            extends compiled.Secondary<PARENT> {
+                        PARENT linked() { return primary(); }
                     }
                     """);
             myFixture.configureFromExistingVirtualFile(inheritance.getVirtualFile());
             myFixture.checkHighlighting(false, false, false);
-            inheritance = myFixture.addFileToProject("consumer/WrongSub.java", """
+            inheritance = myFixture.addFileToProject("consumer/WrongSecondary.java", """
                     package consumer;
-                    public abstract class WrongSub extends compiled.Sub<String> {}
+                    public abstract class WrongSecondary extends compiled.Secondary<String> {}
                     """);
             myFixture.configureFromExistingVirtualFile(inheritance.getVirtualFile());
             var errors = myFixture.doHighlighting(com.intellij.lang.annotation.HighlightSeverity.ERROR);

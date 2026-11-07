@@ -18,9 +18,9 @@ final class TypeArgumentCompletion {
      * the provided arguments cover the first {@code provided.size()} positions
      * and all remaining positions are Jype parameters present in {@code ownParams}.
      *
-     * <p>Typical case: {@code class SubPower<MASTER_POWER,…> extends APISubPower<SubPower<?>, MASTER_POWER>},
-     * where APISubPower declares {@code <API_SUB_POWER, MASTER_POWER, API_PLAYER, …>}.
-     * {@link #buildFixedArgs} fails because MASTER_POWER is "shared" (in ownParams)
+     * <p>Typical case: {@code class Secondary<PARENT,…> extends AbstractSecondary<Secondary<?>, PARENT>},
+     * where AbstractSecondary declares {@code <API_CHILD, PARENT, J_A, …>}.
+     * {@link #buildFixedArgs} fails because PARENT is "shared" (in ownParams)
      * and is not counted as unshared, even though the user supplied it explicitly.
      * This method keeps the 2 provided arguments and adds {@code Ident} nodes for
      * the 6 trailing positions.

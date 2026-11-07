@@ -12,7 +12,7 @@ class JypeCompiledInheritanceTest {
     @Test
     void completesTwentyParametersFromJarWithoutExplicitProcessorSelection() throws IOException {
         var names = java.util.stream.IntStream.range(0, 19)
-                .mapToObj(i -> i == 0 ? "PLAYER" : "TYPE_" + i).toList();
+                .mapToObj(i -> i == 0 ? "J_A" : "TYPE_" + i).toList();
         String parameters = String.join(", ", names);
         String definitions = names.stream().map(name ->
                 "@fr.thegamerfarmer.jype.annotations.TypeDef(name=\"" + name + "\", bound=Object.class)")
@@ -20,22 +20,22 @@ class JypeCompiledInheritanceTest {
         JypeTestCompiler.compileTwoPassJar(Map.of(
                 "api/package-info.java",
                 "@fr.thegamerfarmer.jype.annotations.TypeSystem({" + definitions + "}) package api;",
-                "api/Master.java", "package api; public abstract class Master<" + parameters + "> {}",
-                "api/Sub.java", "package api; public abstract class Sub<MASTER_POWER extends Master<"
+                "api/Primary.java", "package api; public abstract class Primary<" + parameters + "> {}",
+                "api/Secondary.java", "package api; public abstract class Secondary<PARENT extends Primary<"
                         + parameters + ">, " + parameters + "> {}"),
                 Map.of(
                         "consumer/package-info.java", """
                                 @fr.thegamerfarmer.jype.annotations.TypeSystem(
                                     inherit="api",
-                                    overrides=@fr.thegamerfarmer.jype.annotations.TypeDef(name="PLAYER", bound=String.class)
+                                    overrides=@fr.thegamerfarmer.jype.annotations.TypeDef(name="J_A", bound=String.class)
                                 ) package consumer;
                                 """,
-                        "consumer/BGMaster.java",
-                        "package consumer; import api.Master; public abstract class BGMaster extends Master {}",
-                        "consumer/BGSub.java", """
+                        "consumer/ImplPrimary.java",
+                        "package consumer; import api.Primary; public abstract class ImplPrimary extends Primary {}",
+                        "consumer/ImplSecondary.java", """
                                 package consumer;
                                 import api.*;
-                                public abstract class BGSub<MASTER_POWER extends BGMaster> extends Sub<MASTER_POWER> {}
+                                public abstract class ImplSecondary<PARENT extends ImplPrimary> extends Secondary<PARENT> {}
                                 """)).assertSuccess();
     }
 
@@ -43,14 +43,14 @@ class JypeCompiledInheritanceTest {
         return Map.of(
                 "api/package-info.java", """
                         @fr.thegamerfarmer.jype.annotations.TypeSystem({
-                            @fr.thegamerfarmer.jype.annotations.TypeDef(name="PLAYER", bound=Object.class),
-                            @fr.thegamerfarmer.jype.annotations.TypeDef(name="ROLE", bound=Object.class)
+                            @fr.thegamerfarmer.jype.annotations.TypeDef(name="J_A", bound=Object.class),
+                            @fr.thegamerfarmer.jype.annotations.TypeDef(name="J_B", bound=Object.class)
                         }) package api;
                         """,
-                "api/Master.java", "package api; public abstract class Master<PLAYER, ROLE> {}",
-                "api/Sub.java", """
+                "api/Primary.java", "package api; public abstract class Primary<J_A, J_B> {}",
+                "api/Secondary.java", """
                         package api;
-                        public abstract class Sub<MASTER_POWER extends Master<PLAYER, ROLE>, PLAYER, ROLE> {}
+                        public abstract class Secondary<PARENT extends Primary<J_A, J_B>, J_A, J_B> {}
                         """);
     }
 
@@ -60,18 +60,18 @@ class JypeCompiledInheritanceTest {
                 "consumer/package-info.java", """
                         @fr.thegamerfarmer.jype.annotations.TypeSystem(
                             inherit="api",
-                            overrides=@fr.thegamerfarmer.jype.annotations.TypeDef(name="PLAYER", bound=String.class)
+                            overrides=@fr.thegamerfarmer.jype.annotations.TypeDef(name="J_A", bound=String.class)
                         ) package consumer;
                         """,
-                "consumer/BGMaster.java", """
+                "consumer/ImplPrimary.java", """
                         package consumer;
-                        import api.Master;
-                        public abstract class BGMaster extends Master {}
+                        import api.Primary;
+                        public abstract class ImplPrimary extends Primary {}
                         """,
-                "consumer/BGSub.java", """
+                "consumer/ImplSecondary.java", """
                         package consumer;
-                        import api.Sub;
-                        public abstract class BGSub<MASTER_POWER extends BGMaster> extends Sub<MASTER_POWER> {}
+                        import api.Secondary;
+                        public abstract class ImplSecondary<PARENT extends ImplPrimary> extends Secondary<PARENT> {}
                         """)).assertSuccess();
     }
 
@@ -80,7 +80,7 @@ class JypeCompiledInheritanceTest {
         var result = JypeTestCompiler.compileTwoPass(library(), Map.of(
                 "consumer/Invalid.java", """
                         package consumer;
-                        public abstract class Invalid<T> extends api.Sub<T> {}
+                        public abstract class Invalid<T> extends api.Secondary<T> {}
                         """));
         result.assertFailure();
         assertTrue(result.hasError("wrong number of type arguments")

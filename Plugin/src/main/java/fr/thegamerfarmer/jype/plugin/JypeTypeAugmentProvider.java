@@ -22,4 +22,13 @@ public final class JypeTypeAugmentProvider extends PsiAugmentProvider {
     protected @Nullable PsiType inferType(@NotNull PsiTypeElement typeElement) {
         return JypeContextualTypes.infer(typeElement);
     }
+
+    /**
+     * Jype completes explicit types; it never makes them {@code var}-like. IntelliJ's default
+     * would report "Cannot infer type" for completed locals declared without an initializer.
+     */
+    @Override
+    protected boolean canInferType(@NotNull PsiTypeElement typeElement) {
+        return false;
+    }
 }

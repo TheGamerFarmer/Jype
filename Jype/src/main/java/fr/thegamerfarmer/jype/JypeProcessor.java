@@ -57,6 +57,7 @@ public class JypeProcessor extends AbstractProcessor {
     private TypeInjectionPass typeInjectionPass;
     private JavadocSourceGenerator javadocGenerator;
     private DeclarationOrigins origins;
+    private JypePlugin plugin;
     private final Map<TypeElement, Map<String, TypeMirror>> publicClasses = new LinkedHashMap<>();
     private final Map<String, Map<String, TypeMirror>> typeSystems = new LinkedHashMap<>();
 
@@ -95,7 +96,7 @@ public class JypeProcessor extends AbstractProcessor {
         typeInjectionPass = new TypeInjectionPass(trees, make, names, env, astUtils,
                 typeParamInjector.getInjectedTypeParams());
         javadocGenerator = new JavadocSourceGenerator(env, typeParamInjector.getOriginalParamOrders());
-        JypePlugin plugin = ctx.get(JypePlugin.class);
+        plugin = ctx.get(JypePlugin.class);
         origins = plugin == null ? new DeclarationOrigins() : plugin.origins();
         if (plugin != null) javadocGenerator.addStaticEdits(plugin.staticSourceEdits());
         com.sun.source.util.JavacTask.instance(env).addTaskListener(new com.sun.source.util.TaskListener() {
@@ -156,10 +157,24 @@ public class JypeProcessor extends AbstractProcessor {
             }
             typeParamInjector.injectMissingTypeParams(classElement, classTypeSystems.get(classElement));
         }
+        if (plugin != null) {
+            Set<String> completedTypeSystems = new HashSet<>();
+            for (TypeElement classElement : classes) {
+                Map<String, TypeMirror> resolvedTypes = classTypeSystems.get(classElement);
+                String scope = typeSystems.entrySet().stream()
+                        .filter(entry -> entry.getValue() == resolvedTypes)
+                        .map(Map.Entry::getKey)
+                        .findFirst().orElse(null);
+                if (scope != null && completedTypeSystems.add(scope)) {
+                    plugin.completeMemberTypesAfterInjection(scope,
+                            typeParamInjector.getInjectedTypeParams(),
+                            typeParamInjector.getOriginalParamOrders());
+                }
+            }
+        }
         for (TypeElement classElement : classes) {
             typeInjectionPass.processClass(classElement, classTypeSystems.get(classElement));
         }
-
         // Record complete parameter orders needed by Javadoc sources.
         for (TypeElement classElement : classes) {
             trackAllJypeClassForJavadoc(classElement, classTypeSystems.get(classElement));

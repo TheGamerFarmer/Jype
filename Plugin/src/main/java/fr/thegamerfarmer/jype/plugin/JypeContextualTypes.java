@@ -5,6 +5,9 @@ import com.intellij.openapi.util.RecursionManager;
 import com.intellij.psi.*;
 import com.intellij.psi.impl.source.PsiClassReferenceType;
 import com.intellij.psi.impl.source.PsiImmediateClassType;
+import com.intellij.psi.util.CachedValueProvider;
+import com.intellij.psi.util.CachedValuesManager;
+import com.intellij.psi.util.PsiModificationTracker;
 import com.intellij.psi.util.PsiTreeUtil;
 import com.intellij.psi.util.TypeConversionUtil;
 import org.jetbrains.annotations.NotNull;
@@ -54,8 +57,7 @@ final class JypeContextualTypes {
             } else if (lexical.containsKey(name)) {
                 argument = factory.createType(lexical.get(name));
             } else {
-                argument = factory.createType(JypeTypeSystemReader.getOrCreateVirtualClass(
-                        reference.getProject(), system, definitions.get(name), reference.getResolveScope()));
+                argument = binding(reference, system, definitions.get(name), factory);
             }
             substitutor = substitutor.put(parameter, argument);
             arguments.add(argument);
@@ -72,6 +74,50 @@ final class JypeContextualTypes {
             }
         }
         return new Completion(new PublicType(target, substitutor, metadata.managed()), List.copyOf(problems));
+    }
+
+    /**
+     * Like the engine, an alias bound to a class without type parameters is that class itself
+     * (for example {@code ENTITY} is {@code ConcreteNode}); only template bounds remain virtual aliases.
+     * A class naming aliases itself is a template for the engine, so its aliases stay virtual.
+     */
+    private static PsiType binding(PsiJavaCodeReferenceElement reference, JypeTypeSystemReader.Result system,
+                                   JypeTypeSystemReader.TypeDefInfo definition, PsiElementFactory factory) {
+        PsiClass bound = JavaPsiFacade.getInstance(reference.getProject())
+                .findClass(definition.boundFqn(), reference.getResolveScope());
+        if (bound != null && !JypeTypeSystemReader.isVirtualClass(bound) && !bound.hasTypeParameters()
+                && !namesAliases(reference, system)) {
+            return factory.createType(bound);
+        }
+        return factory.createType(JypeTypeSystemReader.getOrCreateVirtualClass(
+                reference.getProject(), system, definition, reference.getResolveScope()));
+    }
+
+    private static boolean namesAliases(PsiElement context, JypeTypeSystemReader.Result system) {
+        Set<String> aliases = new HashSet<>();
+        system.typeDefs().forEach(definition -> aliases.add(definition.name()));
+        for (PsiClass cls = PsiTreeUtil.getContextOfType(context, PsiClass.class, true); cls != null;
+             cls = PsiTreeUtil.getContextOfType(cls, PsiClass.class, true)) {
+            PsiClass owner = cls;
+            Set<String> names = CachedValuesManager.getCachedValue(owner, () -> CachedValueProvider.Result.create(
+                    typeReferenceNames(owner), PsiModificationTracker.MODIFICATION_COUNT));
+            if (!Collections.disjoint(names, aliases)) return true;
+        }
+        return false;
+    }
+
+    /** Unqualified type names written in a class; expressions such as a field named {@code ENTITY} are ignored. */
+    private static Set<String> typeReferenceNames(PsiClass cls) {
+        Set<String> names = new HashSet<>();
+        cls.accept(new JavaRecursiveElementWalkingVisitor() {
+            @Override
+            public void visitReferenceElement(@NotNull PsiJavaCodeReferenceElement reference) {
+                if (!(reference instanceof PsiReferenceExpression) && !reference.isQualified()
+                        && reference.getReferenceName() != null) names.add(reference.getReferenceName());
+                super.visitReferenceElement(reference);
+            }
+        });
+        return Set.copyOf(names);
     }
 
     private static Map<String, PsiTypeParameter> lexicalParameters(PsiElement context) {

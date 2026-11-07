@@ -22,11 +22,11 @@ final class ManagedParameterPropagation {
      * reference classes that received additional Jype parameters through
      * {@link ManagedParameters#injectBodyDetectedTypeParams}.
      *
-     * <p>Example: {@code APISubPower<SUB extends APIMasterPower<SUB>>} — if
-     * APIMasterPower changes from {@code <API_SUB_POWER>} to
-     * {@code <API_SUB_POWER, API_PLAYER, …>} after injection, the bound is
+     * <p>Example: {@code AbstractSecondary<CHILD extends AbstractPrimary<CHILD>>} — if
+     * AbstractPrimary changes from {@code <API_CHILD>} to
+     * {@code <API_CHILD, J_A, …>} after injection, the bound is
      * missing 6 parameters. This method injects those 6 parameters into
-     * APISubPower.
+     * AbstractSecondary.
      *
      * <p>Iterates until convergence to handle cascades.
      */
@@ -34,6 +34,7 @@ final class ManagedParameterPropagation {
                                              Map<String, List<String>> typeParamMap,
                                              Set<String> managedNames,
                                              Set<String> concreteBindings,
+                                             boolean specialized,
                                              TreeMaker make, Names names) {
         boolean changed = true;
         while (changed) {
@@ -42,7 +43,7 @@ final class ManagedParameterPropagation {
                 for (JCTree def : cu.defs) {
                     if (def instanceof JCTree.JCClassDecl cls && hierarchy.activeRoots.contains(cls)) {
                         if (injectParamsFromBounds(cu, cls, typeParamMap, managedNames,
-                                concreteBindings, make, names)) {
+                                concreteBindings, specialized, make, names)) {
                             changed = true;
                         }
                     }
@@ -63,6 +64,7 @@ final class ManagedParameterPropagation {
                                             Map<String, List<String>> typeParamMap,
                                             Set<String> managedNames,
                                             Set<String> concreteBindings,
+                                            boolean specialized,
                                             TreeMaker make, Names names) {
         boolean injected = false;
 
@@ -70,7 +72,7 @@ final class ManagedParameterPropagation {
         for (JCTree member : cls.defs) {
             if (member instanceof JCTree.JCClassDecl inner) {
                 if (injectParamsFromBounds(cu, inner, typeParamMap, managedNames,
-                        concreteBindings, make, names)) {
+                        concreteBindings, specialized, make, names)) {
                     injected = true;
                 }
             }
@@ -83,8 +85,11 @@ final class ManagedParameterPropagation {
         }
 
         injected |= injectDeclaredBoundParameters(cu, cls, typeParamMap, managedNames, ownParams, make, names);
-        injected |= injectSuperclassParameters(cu, cls, typeParamMap, managedNames, concreteBindings,
-                ownParams, make, names);
+        // Specialized systems complete abstract classes with their bindings instead of templates.
+        if (!specialized) {
+            injected |= injectSuperclassParameters(cu, cls, typeParamMap, managedNames, concreteBindings,
+                    ownParams, make, names);
+        }
 
         if (injected) {
             List<String> updatedParams = new ArrayList<>();

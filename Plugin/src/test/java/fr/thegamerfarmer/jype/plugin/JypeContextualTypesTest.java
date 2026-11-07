@@ -58,6 +58,25 @@ public class JypeContextualTypesTest extends JypeJavaFixture {
         assertTrue(((PsiClassType) cls.getFields()[0].getType()).isRaw());
     }
 
+    public void testRecursiveInferenceYieldsToPlatformResolution() {
+        objectSystem("api", "ENTITY");
+        define("game", "inherit=\"api\"");
+        myFixture.addClass("package api; public class Service<ENTITY> {}");
+        PsiJavaFile file = (PsiJavaFile) myFixture.addFileToProject("game/Consumer.java", """
+                package game;
+                class Consumer { api.Service service; }
+                """);
+        PsiTypeElement typeElement = PsiTreeUtil.findChildrenOfType(file, PsiTypeElement.class).stream()
+                .filter(element -> element.getInnermostComponentReferenceElement() != null
+                        && "Service".equals(element.getInnermostComponentReferenceElement().getReferenceName()))
+                .findFirst().orElseThrow();
+        assertNotNull(JypeContextualTypes.infer(typeElement));
+
+        PsiType recursive = JypeContextualTypes.withInferenceGuard(typeElement,
+                () -> JypeContextualTypes.infer(typeElement));
+        assertNull(recursive);
+    }
+
     public void testInheritedMethodIsReallySubstituted() {
         objectSystem("api", "ENTITY");
         define("game", "inherit=\"api\"");

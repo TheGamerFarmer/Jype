@@ -1,6 +1,7 @@
 package fr.thegamerfarmer.jype.plugin;
 
 import com.intellij.openapi.project.DumbService;
+import com.intellij.openapi.util.Computable;
 import com.intellij.openapi.util.RecursionManager;
 import com.intellij.psi.*;
 import com.intellij.psi.impl.source.PsiClassReferenceType;
@@ -18,6 +19,9 @@ import java.util.*;
 /** Completes library types in the caller's scope, retaining real Java substitutions. */
 final class JypeContextualTypes {
     record Completion(PsiClassType type, List<JypeInheritanceArguments.Problem> problems) {}
+
+    private static final ThreadLocal<Set<PsiTypeElement>> INFERENCE_IN_PROGRESS =
+            ThreadLocal.withInitial(() -> Collections.newSetFromMap(new IdentityHashMap<>()));
 
     private JypeContextualTypes() {}
 
@@ -135,13 +139,30 @@ final class JypeContextualTypes {
 
     static @Nullable PsiType infer(PsiTypeElement element) {
         if (DumbService.isDumb(element.getProject())) return null;
+        PsiJavaCodeReferenceElement reference = element.getInnermostComponentReferenceElement();
+        if (reference == null) return null;
+        return withInferenceGuard(element, () -> inferUncached(element, reference));
+    }
+
+    static @Nullable PsiType withInferenceGuard(PsiTypeElement element,
+                                                Computable<PsiType> computation) {
+        Set<PsiTypeElement> active = INFERENCE_IN_PROGRESS.get();
+        if (!active.add(element)) return null;
+        try {
+            return computation.compute();
+        } finally {
+            active.remove(element);
+            if (active.isEmpty()) INFERENCE_IN_PROGRESS.remove();
+        }
+    }
+
+    private static @Nullable PsiType inferUncached(
+            PsiTypeElement element, PsiJavaCodeReferenceElement reference) {
         PsiJavaFile file = PsiTreeUtil.getContextOfType(element, PsiJavaFile.class, false);
         if (file == null || file.getName().startsWith("package-info.")) return null;
         // Arrays and wildcards delegate to their component type elements in Java's parser.
         if (PsiTreeUtil.getChildOfType(element, PsiTypeElement.class) != null) return null;
-        PsiJavaCodeReferenceElement reference = element.getInnermostComponentReferenceElement();
-        if (reference == null) return null;
-        Completion completion = complete(reference);
+        Completion completion = compute(reference);
         if (completion != null) return annotated(completion.type(), element);
         PsiClassReferenceType raw = new PsiClassReferenceType(reference, null);
         PsiClass target = raw.resolve();

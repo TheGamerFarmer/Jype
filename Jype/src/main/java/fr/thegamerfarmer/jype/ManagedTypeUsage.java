@@ -76,6 +76,13 @@ final class ManagedTypeUsage {
             public void visitMethodDef(JCTree.JCMethodDecl nested) {
                 scanMethod(nested, visible, found);
             }
+
+            @Override
+            public void visitSelect(JCTree.JCFieldAccess select) {
+                // ALIAS.member names the alias as a type: its static members are reached through it.
+                if (select.selected instanceof JCTree.JCIdent qualifier) collectType(qualifier, visible, found);
+                scan(select.selected);
+            }
         };
     }
 

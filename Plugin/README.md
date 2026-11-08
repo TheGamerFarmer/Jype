@@ -143,6 +143,15 @@ managed and a completed substitution satisfies their bounds. Missing ordinary
 arguments, invalid overrides, genuine unchecked operations and code without a
 valid visible system retain their diagnostics.
 
+Creations such as `new LINK(entity)` or `ENTITY::new` resolve against the
+non-generic constructors of the alias binding, mirrored on its virtual class;
+missing constructors are still reported. A `private` or `protected` binding
+constructor keeps its access, as in the engine: a singleton may write
+`new SERVICE()` inside its own class, while an inaccessible creation is an
+error. The engine's generated
+`Jype$New$…` factories and `Jype$Install` classes are hidden from completion.
+Which class is created at runtime is decided by the engine, not by the IDE.
+
 ## Public signatures and documentation
 
 Documentation, quick navigation, completion and parameter help present Jype

@@ -88,11 +88,17 @@ public final class JypeNotificationProvider implements EditorNotificationProvide
         return panel;
     }
 
-    /** Excludes the default package and uses the file's module-aware resolve scope. */
+    /**
+     * A file is relevant when a visible type system governs its package, or when a dependency
+     * (library or other module) declares one, so consumers without any local package-info are
+     * covered. Uses the file's module-aware resolve scope.
+     */
     private static boolean isInTypeSystem(@NotNull Project project, @NotNull PsiJavaFile javaFile) {
+        var scope = javaFile.getResolveScope();
         String pkg = javaFile.getPackageName();
-        if (pkg.isEmpty()) return false;
-        return JypeTypeSystemReader.findTypeSystem(project, pkg, javaFile.getResolveScope()) != null;
+        if (!pkg.isEmpty() && JypeTypeSystemReader.findTypeSystem(project, pkg, scope) != null) return true;
+        VirtualFile virtualFile = javaFile.getVirtualFile();
+        return virtualFile != null && JypeTypeSystemReader.usesDependencyTypeSystem(project, virtualFile, scope);
     }
 
     /**

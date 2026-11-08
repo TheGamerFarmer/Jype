@@ -26,9 +26,12 @@ final class PreEnterTransformer {
     private final Map<String, List<JavadocSourceGenerator.SourceEdit>> staticSourceEdits = new LinkedHashMap<>();
     private List<JCTree.JCCompilationUnit> sourceUnits = List.of();
     private final Map<JCTree.JCClassDecl, String> rootScopes = new IdentityHashMap<>();
+    /** Per type system: re-bound alias to the class that closed its F-bound at an ancestor level. */
+    private final Map<String, Map<String, String>> aliasClosers = new HashMap<>();
     private TreeMaker treeMaker;
     private Names names;
     final DeclarationOrigins origins = new DeclarationOrigins();
+    final ManagedConstruction construction;
 
     /** Creates task-local collaborators; no source trees or symbols survive this compilation. */
     PreEnterTransformer(com.sun.tools.javac.util.Context context) {
@@ -41,6 +44,7 @@ final class PreEnterTransformer {
         bounds = new BoundTypeCompletion(hierarchy);
         inheritance = new InheritanceCompletion(hierarchy, bounds);
         members = new MemberTypeCompletion(hierarchy);
+        construction = new ManagedConstruction();
     }
 
     /** Returns the live URI-keyed edits consumed only after this transformation has completed. */
@@ -98,6 +102,21 @@ final class PreEnterTransformer {
             }
         } while (changed);
         staticResolver.collectStaticBounds(cus, index);
+        construction.sourceSystems().addAll(staticResolver.sourceSystems);
+        // Creations are recorded on the parsed trees, before any pass rewrites alias positions.
+        for (JCTree.JCCompilationUnit cu : cus) {
+            for (JCTree def : cu.defs) {
+                if (def instanceof JCTree.JCClassDecl cls && !scopes.get(cls).isEmpty()) {
+                    construction.collect(cu, cls, scopes.get(cls), systems.getOrDefault(scopes.get(cls), Set.of()));
+                }
+            }
+        }
+        for (String scope : new LinkedHashSet<>(scopes.values())) {
+            if (scope.isEmpty() || !staticResolver.inherits(scope) || !overridesFactory(scope)) continue;
+            List<JCTree.JCClassDecl> roots = new ArrayList<>();
+            scopes.forEach((cls, owner) -> { if (owner.equals(scope)) roots.add(cls); });
+            construction.injectInstaller(scope, roots, make, names);
+        }
         for (String scope : new LinkedHashSet<>(scopes.values())) {
             staticResolver.effectiveBounds(scope);
             Set<JCTree.JCClassDecl> roots = Collections.newSetFromMap(new IdentityHashMap<>());
@@ -181,6 +200,10 @@ final class PreEnterTransformer {
             }
         }
         residual = residual.stream().filter(alias -> !concreteTypeMap.containsKey(alias)).toList();
+        inheritance.closers(Map.of(), Map.of());
+        if (specializedInheritedSystem && !residual.isEmpty()) {
+            closeReboundAliases(concreteTypeMap, typeParamMap, residual);
+        }
         if (!residual.isEmpty()) {
             Set<String> specializedBindings = injectResidualIntoBindings(
                     cus, typeParamMap, concreteTypeMap, residual, make, names);
@@ -232,12 +255,75 @@ final class PreEnterTransformer {
                         Map<String, String> bindings = new LinkedHashMap<>(
                                 staticResolver.bounds.getOrDefault(hierarchy.currentTypeSystem, Map.of()));
                         bindings.putAll(concreteTypeMap);
-                        members.completeMemberTypes(cu, cls, typeParamMap, managedNames, bindings, make, names);
+                        members.completeMemberTypes(cu, cls, typeParamMap, managedNames,
+                                memberBindings(hierarchy.currentTypeSystem, bindings), make, names);
                     }
 
                 }
             }
         }
+    }
+
+    /**
+     * Finds, for each alias re-bound below a level that already closed its F-bound, the class that
+     * closed it. Walking from the root system, a binding replaces the previous one only while the
+     * previous one is still a template over the alias: {@code ApiEntity<ENTITY, …>} is replaced by
+     * {@code AppEntity<CLUSTER>}, which a third-level {@code ExtEntity} cannot replace, because
+     * {@code AppEntity} fixed {@code ENTITY} in its supertypes.
+     */
+    private void closeReboundAliases(Map<String, String> concrete, Map<String, List<String>> index,
+                                     List<String> residual) {
+        List<String> chain = new ArrayList<>(staticResolver.ancestors(hierarchy.currentTypeSystem));
+        Collections.reverse(chain);
+        chain.add(hierarchy.currentTypeSystem);
+        Map<String, String> closers = new HashMap<>();
+        Map<String, List<String>> closerParameters = new HashMap<>();
+        for (var entry : concrete.entrySet()) {
+            String alias = entry.getKey();
+            String current = null;
+            for (String system : chain) {
+                String binding = staticResolver.effectiveBounds(system).get(alias);
+                if (binding == null || binding.equals(current)) continue;
+                List<String> previous = current == null ? null : parametersOf(current, index);
+                if (current == null || previous != null && previous.contains(alias)) current = binding;
+            }
+            if (current == null || current.equals(entry.getValue())) continue;
+            List<String> parameters = parametersOf(current, index);
+            if (parameters == null || !residual.containsAll(parameters)) continue;
+            closers.put(entry.getValue(), current);
+            closerParameters.put(current, parameters);
+            aliasClosers.computeIfAbsent(hierarchy.currentTypeSystem, ignored -> new HashMap<>()).put(alias, current);
+        }
+        inheritance.closers(closers, closerParameters);
+    }
+
+    /** Member bindings, with each re-bound alias represented by its closing class in type arguments. */
+    private Map<String, String> memberBindings(String scope, Map<String, String> bindings) {
+        Map<String, String> closed = aliasClosers.getOrDefault(scope, Map.of());
+        members.closedBindings(new HashSet<>(closed.values()));
+        if (closed.isEmpty()) return bindings;
+        Map<String, String> result = new LinkedHashMap<>(bindings);
+        result.putAll(closed);
+        return result;
+    }
+
+    /**
+     * Whether a consumer binds an alias differently from an ancestor whose runtime factory exists,
+     * either compiled on the classpath or generated by this compilation.
+     */
+    private boolean overridesFactory(String scope) {
+        Map<String, String> own = staticResolver.effectiveBounds(scope);
+        for (String ancestor : staticResolver.ancestors(scope)) {
+            Map<String, String> inherited = staticResolver.effectiveBounds(ancestor);
+            for (var entry : own.entrySet()) {
+                if (Objects.equals(inherited.get(entry.getKey()), entry.getValue())) continue;
+                if (construction.createsIn(ancestor, entry.getKey())
+                        || hierarchy.typeResolver.readClass(ManagedConstruction.holderName(ancestor, entry.getKey())) != null) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     /** Reads package names without requiring Enter-created symbols. */
@@ -377,7 +463,7 @@ final class PreEnterTransformer {
         hierarchy.activate(scope, roots);
         Map<String, List<String>> index = hierarchy.buildTypeParamMap(sourceUnits);
         Set<String> managed = parsedSystems.managedNames(sourceUnits).getOrDefault(scope, Set.of());
-        Map<String, String> bindings = staticResolver.effectiveBounds(scope);
+        Map<String, String> bindings = memberBindings(scope, staticResolver.effectiveBounds(scope));
         for (JCTree.JCCompilationUnit cu : sourceUnits) {
             for (JCTree def : cu.defs) {
                 if (def instanceof JCTree.JCClassDecl cls && roots.contains(cls)) {

@@ -3,8 +3,9 @@
 Jype reduces repetition of generic parameters in Java hierarchies. A type system
 declared on a package associates **parameter names** with **class or interface
 bounds**. The engine then completes declarations, generic applications, and
-their recursive bounds in the javac AST. It does not add helper classes to the
-program.
+their recursive bounds in the javac AST. The only classes it adds to the
+program are the runtime factories of `new ALIAS(...)` (see
+[Creating managed types](#creating-managed-types)).
 
 This guide describes using the engine in an already configured compilation.
 Editor integration is documented in the IntelliJ module README.
@@ -119,7 +120,18 @@ Rules:
   (`AppEntity` becomes `AppEntity<J_STORE>` extending
   `ApiEntity<AppEntity<J_STORE>, …, J_STORE>`), so `ENTITY` really
   means `AppEntity` in that package. Static members only receive those residual
-  parameters. Javadoc and public views still show `AppEntity`.
+  parameters: in a static method, `ENTITY` is the binding applied to them
+  (`static ENTITY make()` returns `AppEntity<J_STORE>`), while a method type
+  parameter named like an alias still shadows it. Javadoc and public views
+  still show `AppEntity`.
+- A deeper level can override an alias again (`api` → `impl` binds `ENTITY` to
+  `AppEntity`, then `ext` binds it to `ExtEntity extends AppEntity`).
+  `AppEntity` already fixed `ENTITY` in its supertypes (`ApiEntity<AppEntity<…>, …>`),
+  and Java cannot reopen that self type. In generic positions inherited from the
+  ancestors, `ext` therefore represents `ENTITY` by `AppEntity`: an
+  `ENTITY` variable exposes `AppEntity` members, and members added by
+  `ExtEntity` need a cast. `new ENTITY()` still creates `ExtEntity`
+  everywhere at runtime.
 
 ## Ordinary parameters, partial ownership, and references
 
@@ -232,10 +244,81 @@ receive a setter. Explicit accessors are not duplicated. Lazy variants,
 `onMethod`/`onParam`, and custom `@Accessors` names on these fields are rejected;
 write an explicit static method for these cases.
 
+An alias may also qualify a static member, as in `SERVICE.shared()`, from any
+context: instance and static methods, static member classes, field initializers,
+static blocks and enums. An enum cannot be generic, so it sees every alias as its
+erased binding (a field `ENTITY owner` is stored as the bound class). Enum
+constants and variables named like an alias keep their Java meaning.
+
 Static imports, inherited fields, and compiled generic signatures are tested.
 Overloads with incompatible generic parameter orders do not provide a reliable
 order for automatic rewriting. Ordinary class parameters remain illegal in a
 static context.
+
+## Creating managed types
+
+A managed name can be instantiated like a class. It creates the class bound by
+the **most specific type system of the running program**, including inside a
+separately compiled library:
+
+```java
+// api: ENTITY -> ApiEntity, LINK -> Link (Link has a public Link(ENTITY) constructor)
+public class Cluster {
+    public ENTITY create() { return new ENTITY(); }
+    public LINK link(ENTITY entity) { return new LINK(entity); }
+    public Supplier<ENTITY> entities() { return ENTITY::new; }
+}
+```
+
+Compiled alone, `api` creates `ApiEntity` and `Link`. When a program also
+contains `impl`, whose package-info overrides `ENTITY` with `AppEntity` and
+`LINK` with `AppLink`, the same `api` bytecode creates `AppEntity` and
+`AppLink`, everywhere: in instance and static methods, in static
+initializers, in library classes that `impl` never subclasses, and in `impl`
+itself. Aliases that `impl` does not override keep the library's class.
+
+The JVM cannot instantiate a type variable, so the engine rewrites each
+creation into a call to a generated factory, `api.Jype$New$ENTITY`. Each type
+system using `new ALIAS(...)` gets one factory per alias; its default creates
+that system's binding. A consumer that overrides an alias gets a generated
+`Jype$Install` class: every top-level class of its type system loads it first,
+and it installs the consumer's classes into the factories of all its ancestors.
+The deepest type system wins whatever the class-loading order, so a third-level
+consumer also replaces the factories of the intermediate one. No Jype library is
+needed at runtime: `provided` scope remains valid.
+
+Rules and diagnostics:
+
+- The arguments select a **constructor of the binding** (`new LINK(entity)`
+  requires `Link(ENTITY)`). Varargs and primitive parameters are supported;
+  generic constructors are not mirrored.
+- A creation follows Java's access rules as if it named the binding:
+  `new SERVICE()` compiles where `new Service()` would. A singleton can
+  therefore create its alias through its own `private` or `protected`
+  constructor; elsewhere, an inaccessible constructor is a compilation error.
+  Generated factories reach non-public constructors by reflection, resolved once,
+  and the constructor's exceptions propagate unchanged.
+- A consumer binding must declare a compatible constructor for each one the
+  library uses, with any access (the consumer's type system chose that class);
+  parameter types may be narrowed (`AppLink(AppEntity)`).
+  A missing constructor is a compilation error in the consumer. When the
+  library uses several constructors of the same arity, a missing one is a
+  warning and that creation fails at runtime with an explicit message.
+- An abstract class or an interface binding compiles, but creating it fails at
+  runtime with an explicit message until a more specific type system binds a
+  concrete class.
+- Anonymous subclasses (`new ENTITY() { … }`), qualified creations
+  (`outer.new ENTITY()`) and constructor type arguments are errors.
+- A method type parameter named like an alias shadows it: `new` then keeps its
+  ordinary Java meaning.
+
+**There is one binding per loaded factory class, not one per instance.** Like
+static storage, this assumes a single compatible family per runtime: two
+consumers overriding the same library differently in one class loader would
+replace each other's classes. Bindings are installed when the first class of the
+consumer's type system is initialized; a library creating objects before any
+consumer class has loaded still gets its own classes. Javadoc copies keep the
+written `new ALIAS(...)` and omit the generated factories.
 
 ## Compiler execution and processor coexistence
 
@@ -365,6 +448,8 @@ includes the license text and attribution notices.
 | `PreEnterTrees` / `TypeArgumentCompletion` | Builds trees without symbols and preserves user arguments |
 | `StaticBoundResolver` / `StaticOwners` | Package bounds and metadata for inherited/compiled static owners |
 | `StaticTypeSupport` / `StaticAccessRewriter` | Lowers static declarations, then rewrites accesses while tracking local scopes |
+| `ManagedConstruction` | Records `new ALIAS(...)` / `ALIAS::new` before Enter and injects consumer installer loading |
+| `ConstructionFactories` | Rewrites creations after the processor passes and generates factories and installers |
 | `JypeProcessor` | Coordinates rounds and selects a type system for each root |
 | `TypeSystemResolver` | Validates annotations and resolves TypeMirrors |
 | `TypeParamInjector` | Adds missing parameters to AST, symbols, and scope after Enter |

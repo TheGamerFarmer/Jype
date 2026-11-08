@@ -34,9 +34,30 @@ final class InheritanceCompletion {
         this.specializedBindings = Set.copyOf(specializedBindings);
     }
 
+    /**
+     * Bindings that cannot be the self type of inherited templates: at a third level, a binding
+     * extending a class that already closed the alias's F-bound is represented, in type arguments,
+     * by that closing class ({@code ExtEntity -> AppEntity}), with the residual aliases it owns.
+     */
+    void closers(Map<String, String> closers, Map<String, List<String>> closerParameters) {
+        this.closers = Map.copyOf(closers);
+        this.closerParameters = Map.copyOf(closerParameters);
+    }
+
+    private Map<String, String> closers = Map.of();
+    private Map<String, List<String>> closerParameters = Map.of();
+
     /** A concrete binding, applied to the residual aliases when it owns them. */
-    JCTree.JCExpression concreteExpression(String fqn, TreeMaker make, Names names) {
+    JCTree.JCExpression concreteExpression(String binding, TreeMaker make, Names names) {
+        String fqn = closers.getOrDefault(binding, binding);
         JCTree.JCExpression type = buildQualifiedName(fqn, make, names);
+        if (!fqn.equals(binding)) {
+            List<String> parameters = closerParameters.getOrDefault(fqn, List.of());
+            if (parameters.isEmpty()) return type;
+            List<JCTree.JCExpression> arguments = new ArrayList<>();
+            for (String parameter : parameters) arguments.add(make.Ident(names.fromString(parameter)));
+            return make.TypeApply(type, com.sun.tools.javac.util.List.from(arguments));
+        }
         if (residual.isEmpty() || !specializedBindings.contains(fqn)) return type;
         List<JCTree.JCExpression> arguments = new ArrayList<>();
         for (String parameter : residual) arguments.add(make.Ident(names.fromString(parameter)));

@@ -11,6 +11,60 @@ import java.util.Map;
 
 /** Inheritance and member resolution from compiled package annotations. */
 public class JypeCompiledTypeSystemTest extends JypeJavaFixture {
+    /** A dependency declaring a type system activates the plugin without any local package-info. */
+    public void testDependencyTypeSystemActivatesWithoutLocalDeclaration() throws Exception {
+        Path workspace = Files.createDirectories(Path.of("build", "test-fixtures",
+                "jype-plugin-activation-" + java.util.UUID.randomUUID()).toAbsolutePath());
+        try {
+            Path src = Files.createDirectories(workspace.resolve("src"));
+            Path out = Files.createDirectories(workspace.resolve("classes"));
+            Map<String, String> sources = Map.of(
+                    "TypeDef.java", """
+                            package fr.thegamerfarmer.jype.annotations;
+                            public @interface TypeDef { String name(); Class<?> bound(); }
+                            """,
+                    "TypeSystem.java", """
+                            package fr.thegamerfarmer.jype.annotations;
+                            public @interface TypeSystem {
+                                TypeDef[] value() default {}; String inherit() default "";
+                                TypeDef[] overrides() default {};
+                            }
+                            """,
+                    "package-info.java", """
+                            @fr.thegamerfarmer.jype.annotations.TypeSystem({
+                                @fr.thegamerfarmer.jype.annotations.TypeDef(name="TYPE", bound=Object.class)
+                            })
+                            package activation.lib;
+                            """);
+            for (var entry : sources.entrySet()) Files.writeString(src.resolve(entry.getKey()), entry.getValue());
+            String compiler = Path.of(System.getProperty("jype.test.jdk"), "bin",
+                    System.getProperty("os.name").startsWith("Windows") ? "javac.exe" : "javac").toString();
+            var arguments = new java.util.ArrayList<>(java.util.List.of(compiler, "--release", "17", "-proc:none", "-d", out.toString()));
+            sources.keySet().forEach(name -> arguments.add(src.resolve(name).toString()));
+            Path log = workspace.resolve("javac.log");
+            Process javac = new ProcessBuilder(arguments).redirectErrorStream(true).redirectOutput(log.toFile()).start();
+            if (!javac.waitFor(60, java.util.concurrent.TimeUnit.SECONDS)) {
+                javac.destroyForcibly();
+                fail("Timed out compiling the library fixture");
+            }
+            assertEquals(Files.readString(log), 0, javac.exitValue());
+            var file = myFixture.addFileToProject("pom.xml", "<project/>");
+            var consumer = myFixture.addFileToProject("app/Plain.java", "package app; class Plain {}").getVirtualFile();
+            var provider = new JypeNotificationProvider();
+            assertNull("No dependency and no local system: inactive",
+                    provider.collectNotificationData(getProject(), consumer));
+            PsiTestUtil.addLibrary(getTestRootDisposable(), getModule(), "jype-activation-library",
+                    workspace.toString(), "classes");
+            assertNotNull("A dependency using Jype activates the plugin",
+                    provider.collectNotificationData(getProject(), consumer));
+            assertNotNull(file);
+        } finally {
+            try (var files = Files.walk(workspace)) {
+                for (Path path : files.sorted(Comparator.reverseOrder()).toList()) Files.delete(path);
+            }
+        }
+    }
+
     public void testInheritanceFromCompiledPackageInfo() throws Exception {
         Path workspace = Files.createDirectories(Path.of("build", "test-fixtures",
                 "jype-plugin-library-" + java.util.UUID.randomUUID()).toAbsolutePath());

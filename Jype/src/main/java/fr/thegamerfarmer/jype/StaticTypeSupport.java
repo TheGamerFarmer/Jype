@@ -82,8 +82,19 @@ final class StaticTypeSupport {
     }
 
     private void lower(Owner owner) {
+        if ((owner.tree.mods.flags & Flags.ENUM) != 0) bindEnumAliases(owner.tree);
+        Set<String> fieldNames = new HashSet<>();
+        for (var member : owner.tree.defs) {
+            if (member instanceof JCTree.JCVariableDecl field) fieldNames.add(field.name.toString());
+        }
         List<JCTree> generated = new ArrayList<>();
         for (var member : owner.tree.defs) {
+            // Static initializers have no alias variable: qualifiers reach the binding's members.
+            if (member instanceof JCTree.JCVariableDecl field && isStatic(field.mods.flags)) {
+                bindAliases(field.init, fieldNames, false);
+            } else if (member instanceof JCTree.JCBlock block && isStatic(block.flags)) {
+                bindAliases(block, fieldNames, false);
+            }
             if (member instanceof JCTree.JCVariableDecl field && isStatic(field.mods.flags)) {
                 JCTree.JCExpression view = complete(owner.unit, copy(field.vartype));
                 if (!usesManaged(view)) continue;
@@ -129,6 +140,7 @@ final class StaticTypeSupport {
                     if (!exists) owner.methods.put(methodName, List.copyOf(managed));
                 }
             } else if (member instanceof JCTree.JCMethodDecl method && isStatic(method.mods.flags)) {
+                if (specialized()) specializeStaticAliases(method);
                 new TreeScanner() {
                     @Override public void visitMethodDef(JCTree.JCMethodDecl tree) {
                         tree.restype = completeForMethod(owner.unit, tree.restype);
@@ -218,6 +230,77 @@ final class StaticTypeSupport {
 
     JCTree.JCExpression specializedArgument(String alias) {
         return concreteExpression.apply(concrete.get(alias));
+    }
+
+    /**
+     * A static method of a specialized system has no class parameter: each non-residual alias in a
+     * type position becomes its binding applied to the residual aliases, which the method then owns
+     * ({@code ENTITY} becomes {@code AppEntity<CLUSTER>}). Method parameters named like an alias
+     * shadow it, and qualified names are never aliases.
+     */
+    private void specializeStaticAliases(JCTree.JCMethodDecl method) {
+        Set<String> shadowed = new HashSet<>();
+        method.typarams.forEach(parameter -> shadowed.add(parameter.name.toString()));
+        TreeTranslator aliases = new TreeTranslator() {
+            @Override public void visitIdent(JCTree.JCIdent tree) {
+                String name = tree.name.toString();
+                result = concrete.containsKey(name) && !residual.contains(name) && !shadowed.contains(name)
+                        ? specializedType(name, tree.pos) : tree;
+            }
+            @Override public void visitSelect(JCTree.JCFieldAccess tree) { result = tree; }
+        };
+        method.restype = aliases.translate(method.restype);
+        method.typarams.forEach(parameter -> parameter.bounds = aliases.translate(parameter.bounds));
+        TreeScanner positions = new TreeScanner() {
+            @Override public void visitVarDef(JCTree.JCVariableDecl tree) {
+                tree.vartype = aliases.translate(tree.vartype);
+                scan(tree.init);
+            }
+            @Override public void visitTypeCast(JCTree.JCTypeCast tree) {
+                tree.clazz = aliases.translate(tree.clazz);
+                scan(tree.expr);
+            }
+            @Override public void visitTypeTest(JCTree.JCInstanceOf tree) {
+                if (tree.pattern instanceof JCTree.JCExpression type) tree.pattern = aliases.translate(type);
+                else scan(tree.pattern);
+                scan(tree.expr);
+            }
+            @Override public void visitNewClass(JCTree.JCNewClass tree) {
+                tree.clazz = aliases.translate(tree.clazz);
+                scan(tree.encl);
+                scan(tree.args);
+                scan(tree.def);
+            }
+            @Override public void visitNewArray(JCTree.JCNewArray tree) {
+                tree.elemtype = aliases.translate(tree.elemtype);
+                scan(tree.dims);
+                scan(tree.elems);
+            }
+            @Override public void visitApply(JCTree.JCMethodInvocation tree) {
+                tree.typeargs = aliases.translate(tree.typeargs);
+                scan(tree.meth);
+                scan(tree.args);
+            }
+            @Override public void visitClassDef(JCTree.JCClassDecl tree) {
+                // Local and anonymous class bodies stay in the static context of the method.
+                tree.typarams.forEach(parameter -> parameter.bounds = aliases.translate(parameter.bounds));
+                tree.extending = aliases.translate(tree.extending);
+                tree.implementing = aliases.translate(tree.implementing);
+                scan(tree.defs);
+            }
+            @Override public void visitMethodDef(JCTree.JCMethodDecl tree) {
+                tree.restype = aliases.translate(tree.restype);
+                scan(tree.params);
+                scan(tree.body);
+            }
+        };
+        positions.scan(method.params);
+        positions.scan(method.body);
+    }
+
+    private JCTree.JCExpression specializedType(String alias, int position) {
+        make.at(position);
+        return specializedArgument(alias);
     }
 
     /** Adds method-owned parameters and records source insertions, preserving explicit ordinary ones. */
@@ -338,6 +421,133 @@ final class StaticTypeSupport {
             return qualified(bound);
         }
         return copy(view);
+    }
+
+    /**
+     * An enum cannot own alias parameters, so every member is a static context: aliases in its
+     * type positions and member qualifiers become their erased bindings. Names the enum declares
+     * as variables (constants, fields, parameters, locals) are never rewritten.
+     */
+    private void bindEnumAliases(JCTree.JCClassDecl enumeration) {
+        Set<String> excluded = new HashSet<>();
+        enumeration.typarams.forEach(parameter -> excluded.add(parameter.name.toString()));
+        new TreeScanner() {
+            @Override public void visitVarDef(JCTree.JCVariableDecl tree) {
+                excluded.add(tree.name.toString());
+                super.visitVarDef(tree);
+            }
+            @Override public void visitClassDef(JCTree.JCClassDecl tree) {
+                if (tree == enumeration || tree.name.isEmpty()) super.visitClassDef(tree);
+            }
+        }.scan(enumeration);
+        for (JCTree member : enumeration.defs) {
+            if (!(member instanceof JCTree.JCClassDecl)) bindAliases(member, excluded, true);
+        }
+    }
+
+    /**
+     * Replaces aliases that have no type variable in scope by their erased binding: always as
+     * member qualifiers ({@code SERVICE.shared()}), and in type positions when {@code types}.
+     * Method and local class parameters shadow aliases, and variables obscure them as qualifiers.
+     */
+    private void bindAliases(JCTree tree, Set<String> excluded, boolean types) {
+        if (tree == null) return;
+        Set<String> variables = new HashSet<>(excluded);
+        new TreeScanner() {
+            @Override public void visitVarDef(JCTree.JCVariableDecl variable) {
+                variables.add(variable.name.toString());
+                super.visitVarDef(variable);
+            }
+        }.scan(tree);
+        Deque<Set<String>> shadowed = new ArrayDeque<>();
+        shadowed.push(variables);
+        TreeTranslator typeNames = new TreeTranslator() {
+            @Override public void visitIdent(JCTree.JCIdent ident) {
+                result = bindable(ident, shadowed.peek()) ? binding(ident) : ident;
+            }
+            @Override public void visitSelect(JCTree.JCFieldAccess select) {
+                select.selected = translate(select.selected);
+                result = select;
+            }
+        };
+        new TreeScanner() {
+            private JCTree.JCExpression type(JCTree.JCExpression expression) {
+                return types ? typeNames.translate(expression) : expression;
+            }
+            @Override public void visitSelect(JCTree.JCFieldAccess select) {
+                if (select.selected instanceof JCTree.JCIdent qualifier && bindable(qualifier)) {
+                    select.selected = binding(qualifier);
+                } else {
+                    scan(select.selected);
+                }
+            }
+            @Override public void visitVarDef(JCTree.JCVariableDecl variable) {
+                variable.vartype = type(variable.vartype);
+                scan(variable.init);
+            }
+            @Override public void visitMethodDef(JCTree.JCMethodDecl method) {
+                Set<String> local = new HashSet<>(shadowed.peek());
+                method.typarams.forEach(parameter -> local.add(parameter.name.toString()));
+                shadowed.push(local);
+                method.restype = type(method.restype);
+                scan(method.params);
+                scan(method.body);
+                shadowed.pop();
+            }
+            @Override public void visitClassDef(JCTree.JCClassDecl cls) {
+                Set<String> local = new HashSet<>(shadowed.peek());
+                cls.typarams.forEach(parameter -> local.add(parameter.name.toString()));
+                shadowed.push(local);
+                scan(cls.defs);
+                shadowed.pop();
+            }
+            @Override public void visitTypeCast(JCTree.JCTypeCast cast) {
+                if (cast.clazz instanceof JCTree.JCExpression clazz) cast.clazz = type(clazz);
+                scan(cast.expr);
+            }
+            @Override public void visitTypeTest(JCTree.JCInstanceOf test) {
+                if (test.pattern instanceof JCTree.JCExpression pattern) test.pattern = type(pattern);
+                else scan(test.pattern);
+                scan(test.expr);
+            }
+            @Override public void visitNewClass(JCTree.JCNewClass creation) {
+                creation.clazz = type(creation.clazz);
+                scan(creation.encl);
+                scan(creation.args);
+                scan(creation.def);
+            }
+            @Override public void visitNewArray(JCTree.JCNewArray array) {
+                array.elemtype = type(array.elemtype);
+                scan(array.dims);
+                scan(array.elems);
+            }
+            @Override public void visitApply(JCTree.JCMethodInvocation call) {
+                if (types) call.typeargs = typeNames.translate(call.typeargs);
+                scan(call.meth);
+                scan(call.args);
+            }
+            @Override public void visitReference(JCTree.JCMemberReference reference) {
+                if (reference.expr instanceof JCTree.JCIdent qualifier && bindable(qualifier)) {
+                    reference.expr = binding(qualifier);
+                } else {
+                    scan(reference.expr);
+                }
+            }
+
+            private boolean bindable(JCTree.JCIdent ident) {
+                return StaticTypeSupport.this.bindable(ident, shadowed.peek());
+            }
+        }.scan(tree);
+    }
+
+    private boolean bindable(JCTree.JCIdent ident, Set<String> shadowed) {
+        String name = ident.name.toString();
+        return managed.contains(name) && bounds.containsKey(name) && !shadowed.contains(name);
+    }
+
+    private JCTree.JCExpression binding(JCTree.JCIdent ident) {
+        make.at(ident.pos);
+        return qualified(bounds.get(ident.name.toString()));
     }
 
     private <T extends JCTree> T eraseTypes(Owner owner, T tree) {

@@ -278,6 +278,19 @@ arguments omitted from usages of a transformed class; this is not a new general
 Java inference syntax. Ordering rules, F-bounds, separately compiled classes,
 and partial-argument examples are detailed in the engine README.
 
+## Creating managed types
+
+`new Entity()`, `new Entity(arguments)` and `Entity::new` create the class bound
+by the most specific type system of the running program. A library written with
+`new Entity()` creates `EntityBase` when used alone, and the consumer's class
+once a consumer overrides `Entity`, even in library code the consumer never
+subclasses. The arguments must match a constructor of the binding, accessible as
+for `new EntityBase(...)` (a singleton may use its private or protected
+constructor), and an overriding class must declare the constructors the library
+uses. Like static
+storage, there is one binding per runtime. See the
+[engine README](Jype/README.md#creating-managed-types) for the rules.
+
 ## Static members: shared storage
 
 Jype supports `static` fields and methods that use these types. Fields retain

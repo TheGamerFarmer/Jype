@@ -12,6 +12,7 @@ public final class JypeSignatureCompletionContributor extends CompletionContribu
         result.runRemainingContributors(parameters, candidate -> {
             Object object = candidate.getLookupElement().getObject();
             if (object instanceof PsiElement technical && JypeMemberMetadata.isTechnical(technical)) return;
+            if (object instanceof PsiClass generated && isGeneratedFactory(generated)) return;
             if (!(object instanceof PsiElement element) || !JypePublicPresentation.applies(element)) {
                 result.passResult(candidate);
                 return;
@@ -37,6 +38,16 @@ public final class JypeSignatureCompletionContributor extends CompletionContribu
             };
             result.passResult(candidate.withLookupElement(item));
         });
+    }
+
+    /**
+     * Hides the engine's runtime factories ({@code Jype$New$ALIAS}) and installers
+     * ({@code Jype$Install}): source code writes {@code new ALIAS(...)}, never these classes.
+     */
+    static boolean isGeneratedFactory(PsiClass cls) {
+        String name = cls.getName();
+        return name != null && cls.getContainingClass() == null
+                && (name.startsWith("Jype$New$") || name.equals("Jype$Install"));
     }
 
     private static void decorate(PsiElement element, LookupElementPresentation presentation) {

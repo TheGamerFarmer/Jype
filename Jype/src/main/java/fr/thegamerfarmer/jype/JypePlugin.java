@@ -93,4 +93,9 @@ public final class JypePlugin implements Plugin {
     DeclarationOrigins origins() {
         return transformer.origins;
     }
+
+    /** Alias creations recorded before Enter, rewritten by the processor after its passes. */
+    ManagedConstruction construction() {
+        return transformer.construction;
+    }
 }

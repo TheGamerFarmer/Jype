@@ -37,6 +37,9 @@ final class ManagedParameters {
             }
         }
 
+        // Enums cannot be generic: StaticTypeSupport binds the aliases they use instead.
+        if ((cls.mods.flags & com.sun.tools.javac.code.Flags.ENUM) != 0) return;
+
         // Already-declared parameters.
         Set<String> declared = new LinkedHashSet<>();
         for (JCTree.JCTypeParameter tp : cls.typarams) {

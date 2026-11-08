@@ -14,8 +14,16 @@ import java.util.*;
 final class MemberTypeCompletion {
     private final SourceHierarchy hierarchy;
 
+    private Set<String> closedBindings = Set.of();
+
     /** Uses the final declaration index after static lowering. */
     MemberTypeCompletion(SourceHierarchy hierarchy) { this.hierarchy = hierarchy; }
+
+    /**
+     * Compiled classes that closed a re-bound alias at an ancestor level; like source bindings,
+     * they are applied to the residual aliases in scope instead of being left as wildcards.
+     */
+    void closedBindings(Set<String> bindings) { closedBindings = Set.copyOf(bindings); }
 
     /** Template-valued library uses need lexical variables before recursive bounds are entered. */
     void injectRequiredClassParameters(JCTree.JCCompilationUnit cu, JCTree.JCClassDecl cls,
@@ -191,7 +199,8 @@ final class MemberTypeCompletion {
                     }
                     List<String> boundParameters = hierarchy.resolveTypeParams(index, cu, result);
                     if (boundParameters != null && !boundParameters.isEmpty() && !boundParameters.contains(parameter)
-                            && index.containsKey(binding) && available.containsAll(boundParameters)) {
+                            && (index.containsKey(binding) || closedBindings.contains(binding))
+                            && available.containsAll(boundParameters)) {
                         // A specialized binding is applied to the residual aliases in scope.
                         List<JCTree.JCExpression> arguments = new ArrayList<>();
                         for (String boundParameter : boundParameters) {

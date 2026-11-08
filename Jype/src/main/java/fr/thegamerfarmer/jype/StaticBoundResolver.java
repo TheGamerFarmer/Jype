@@ -17,6 +17,8 @@ final class StaticBoundResolver {
     final Map<String, Map<String, String>> bounds = new LinkedHashMap<>();
     private final Map<String, String> parents = new LinkedHashMap<>();
     private final Set<String> localDefinitions = new HashSet<>();
+    /** Type systems whose {@code package-info.java} belongs to this compilation. */
+    final Set<String> sourceSystems = new LinkedHashSet<>();
     private final JavaFileManager fileManager;
     private final SourceHierarchy hierarchy;
 
@@ -34,6 +36,7 @@ final class StaticBoundResolver {
                 for (var annotation : pkg.annotations) {
                     if (!annotationName(annotation).equals("TypeSystem")) continue;
                     String scope = getCuPackage(cu);
+                    sourceSystems.add(scope);
                     Map<String, String> packageBounds = bounds.computeIfAbsent(scope, ignored -> new LinkedHashMap<>());
                     new com.sun.tools.javac.tree.TreeScanner() {
                         @Override public void visitAnnotation(JCTree.JCAnnotation tree) {
@@ -77,6 +80,35 @@ final class StaticBoundResolver {
 
     boolean hasLocalDefinitions(String scope) {
         return localDefinitions.contains(scope);
+    }
+
+    /**
+     * Lists inherited type systems from the direct parent to the root, through source and compiled
+     * package metadata; a cycle stops the walk instead of looping.
+     */
+    List<String> ancestors(String scope) {
+        List<String> result = new ArrayList<>();
+        Set<String> visited = new HashSet<>(Set.of(scope));
+        String current = scope;
+        while (true) {
+            String parent = parents.get(current);
+            if (parent == null) parent = compiledParent(current);
+            if (parent == null || parent.isEmpty() || !visited.add(parent)) return result;
+            result.add(parent);
+            current = parent;
+        }
+    }
+
+    private String compiledParent(String scope) {
+        if (sourceSystems.contains(scope)) return null;
+        try {
+            JavaFileObject file = fileManager.getJavaFileForInput(
+                    StandardLocation.CLASS_PATH, scope + ".package-info", JavaFileObject.Kind.CLASS);
+            var data = file == null ? null : TypeSystemClassFileReader.read(file);
+            return data == null ? null : data.parentPackage();
+        } catch (IOException e) {
+            throw new IllegalStateException("[Jype] Cannot read type system parent for " + scope, e);
+        }
     }
 
     Map<String, String> effectiveBounds(String scope) {

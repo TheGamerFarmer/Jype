@@ -35,8 +35,9 @@ import java.util.*;
  *       patches for Javadoc.</li>
  * </ol>
  *
- * <p>No Java files are generated for recompilation; javac continues with the
- * modified in-memory AST. Only Javadoc copies are written at the end of processing.
+ * <p>javac continues with the modified in-memory AST. The only generated sources are the
+ * runtime factories and installers of {@code new ALIAS(...)} (see {@link ConstructionFactories}),
+ * compiled in the next round; Javadoc copies are written at the end of processing.
  *
  * <h2>Traitement en deux passes</h2>
  * <ol>
@@ -58,6 +59,9 @@ public class JypeProcessor extends AbstractProcessor {
     private JavadocSourceGenerator javadocGenerator;
     private DeclarationOrigins origins;
     private JypePlugin plugin;
+    private TreeMaker constructionMaker;
+    private Names constructionNames;
+    private boolean constructionsRewritten;
     private final Map<TypeElement, Map<String, TypeMirror>> publicClasses = new LinkedHashMap<>();
     private final Map<String, Map<String, TypeMirror>> typeSystems = new LinkedHashMap<>();
 
@@ -89,6 +93,8 @@ public class JypeProcessor extends AbstractProcessor {
         trees = Trees.instance(env);
         TreeMaker make = TreeMaker.instance(ctx);
         Names names = Names.instance(ctx);
+        constructionMaker = make;
+        constructionNames = names;
 
         JypeAstUtils astUtils = new JypeAstUtils(make, names, env);
         typeSystemResolver = new TypeSystemResolver(env);
@@ -137,6 +143,7 @@ public class JypeProcessor extends AbstractProcessor {
         List<TypeElement> classes = new ArrayList<>();
         Map<TypeElement, Map<String, TypeMirror>> classTypeSystems = new IdentityHashMap<>();
         for (Element root : roundEnv.getRootElements()) {
+            if (ManagedConstruction.isGenerated(root.getSimpleName())) continue;
             if (root.getKind() == ElementKind.CLASS || root.getKind() == ElementKind.INTERFACE) {
                 TypeElement classElement = (TypeElement) root;
                 Map<String, TypeMirror> resolvedTypes = findClassTypeSystem(classElement, new HashSet<>());
@@ -179,7 +186,25 @@ public class JypeProcessor extends AbstractProcessor {
         for (TypeElement classElement : classes) {
             trackAllJypeClassForJavadoc(classElement, classTypeSystems.get(classElement));
         }
+        // Creations need the final class expressions produced by every pass above.
+        if (plugin != null && !constructionsRewritten) {
+            constructionsRewritten = true;
+            new ConstructionFactories(processingEnv, trees, constructionMaker, constructionNames,
+                    plugin.construction(), this::typeSystem).run();
+        }
         return false;
+    }
+
+    /** Resolves a type system by package, including compiled ancestors not annotated in this round. */
+    @Nullable
+    private Map<String, TypeMirror> typeSystem(String packageName) {
+        Map<String, TypeMirror> known = typeSystems.get(packageName);
+        if (known != null) return known;
+        PackageElement element = processingEnv.getElementUtils().getPackageElement(packageName);
+        if (element == null || element.getAnnotation(fr.thegamerfarmer.jype.annotations.TypeSystem.class) == null) return null;
+        Map<String, TypeMirror> resolved = typeSystemResolver.resolve(element);
+        if (resolved != null) typeSystems.put(packageName, resolved);
+        return resolved;
     }
 
     private void publishPublicView(TypeElement element) {
@@ -274,6 +299,7 @@ public class JypeProcessor extends AbstractProcessor {
 
     private void collectSourceFiles(@NotNull RoundEnvironment roundEnv) {
         for (Element root : roundEnv.getRootElements()) {
+            if (ManagedConstruction.isGenerated(root.getSimpleName())) continue;
             javax.tools.JavaFileObject sf = null;
             TreePath rootPath = trees.getPath(root);
             if (rootPath != null) {

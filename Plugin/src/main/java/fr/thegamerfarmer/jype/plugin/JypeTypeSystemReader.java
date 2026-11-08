@@ -1,12 +1,15 @@
 package fr.thegamerfarmer.jype.plugin;
 
 import com.intellij.ide.highlighter.JavaFileType;
+import com.intellij.openapi.module.Module;
 import com.intellij.openapi.progress.ProgressManager;
 import com.intellij.openapi.project.DumbService;
 import com.intellij.openapi.project.Project;
+import com.intellij.openapi.roots.ProjectFileIndex;
 import com.intellij.openapi.roots.ProjectRootModificationTracker;
 import com.intellij.openapi.util.Key;
 import com.intellij.openapi.util.RecursionManager;
+import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.psi.*;
 import com.intellij.psi.impl.java.stubs.index.JavaAnnotationIndex;
 import com.intellij.psi.search.GlobalSearchScope;
@@ -34,7 +37,9 @@ public final class JypeTypeSystemReader {
     private static final Key<CachedValue<State>> STATE = Key.create("jype.typeSystems");
     private static final Key<Boolean> VIRTUAL = Key.create("jype.virtualType");
     private static final Key<Result> DECLARATION = Key.create("jype.virtualDeclaration");
+    private static final Key<PsiMethod> MIRRORED = Key.create("jype.mirroredConstructor");
     private static final ThreadLocal<Boolean> READING = ThreadLocal.withInitial(() -> false);
+    private static final ThreadLocal<Set<VirtualKey>> BUILDING = ThreadLocal.withInitial(HashSet::new);
 
     private JypeTypeSystemReader() {}
 
@@ -73,6 +78,16 @@ public final class JypeTypeSystemReader {
                                 new ConcurrentHashMap<>(), new ConcurrentHashMap<>()),
                         PsiModificationTracker.MODIFICATION_COUNT,
                         ProjectRootModificationTracker.getInstance(project)), false);
+    }
+
+    /**
+     * Returns the binding constructor a virtual alias constructor stands for.
+     *
+     * @param constructor constructor resolved on an alias
+     * @return the binding's declared constructor, or {@code null} for other methods
+     */
+    public static @Nullable PsiMethod mirroredConstructor(PsiMethod constructor) {
+        return constructor.getUserData(MIRRORED);
     }
 
     /**
@@ -156,6 +171,27 @@ public final class JypeTypeSystemReader {
     }
 
     /**
+     * Detects a type system declared by a dependency of the requesting file, using the same
+     * scope-filtered snapshot as {@code inherit} completion. A dependency is a library
+     * ({@code package-info.class}) or another module; declarations in the file's own module do not
+     * count, so a local package-info keeps governing only its own package tree.
+     *
+     * @param project owning project
+     * @param file requesting source file
+     * @param scope the file's resolve scope
+     * @return whether at least one visible type system comes from outside the file's own module
+     */
+    public static boolean usesDependencyTypeSystem(Project project, VirtualFile file, GlobalSearchScope scope) {
+        ProjectFileIndex index = ProjectFileIndex.getInstance(project);
+        Module own = index.getModuleForFile(file);
+        for (Result result : getTypeSystems(project, scope)) {
+            VirtualFile declaring = result.declaration().getContainingFile().getVirtualFile();
+            if (declaring != null && !Objects.equals(index.getModuleForFile(declaring), own)) return true;
+        }
+        return false;
+    }
+
+    /**
      * Recognizes source package annotations without resolving annotation reference identity.
      *
      * @param file source file to examine
@@ -222,17 +258,70 @@ public final class JypeTypeSystemReader {
         PsiClass bound = JavaPsiFacade.getInstance(project)
                 .findClass(definition.boundFqn(), system.declaration().getResolveScope());
         String clause = bound != null && bound.isInterface() ? " implements " : " extends ";
-        String source = "package " + system.pkg() + "; public class " + definition.name()
-                + clause + definition.boundFqn() + templateArguments(project, system, bound) + " {}";
-        PsiJavaFile file = (PsiJavaFile) PsiFileFactory.getInstance(project)
-                .createFileFromText(definition.name() + ".java", JavaFileType.INSTANCE, source);
-        ((com.intellij.psi.impl.source.PsiFileImpl) file)
-                .setOriginalFile(system.declaration().getContainingFile());
-        PsiClass created = file.getClasses()[0];
-        created.putUserData(VIRTUAL, true);
-        created.putUserData(DECLARATION, system);
-        PsiClass raced = cache.putIfAbsent(key, created);
-        return raced != null ? raced : created;
+        Set<VirtualKey> building = BUILDING.get();
+        // A constructor parameter naming this alias re-enters the finder: the nested request gets
+        // an uncached class without constructors, enough to resolve the parameter's type.
+        boolean reentrant = !building.add(key);
+        try {
+            String source = "package " + system.pkg() + "; public class " + definition.name()
+                    + clause + definition.boundFqn() + templateArguments(project, system, bound)
+                    + " {" + (reentrant ? "" : constructors(definition.name(), bound)) + "}";
+            PsiJavaFile file = (PsiJavaFile) PsiFileFactory.getInstance(project)
+                    .createFileFromText(definition.name() + ".java", JavaFileType.INSTANCE, source);
+            ((com.intellij.psi.impl.source.PsiFileImpl) file)
+                    .setOriginalFile(system.declaration().getContainingFile());
+            PsiClass created = file.getClasses()[0];
+            created.putUserData(VIRTUAL, true);
+            created.putUserData(DECLARATION, system);
+            if (!reentrant) {
+                List<PsiMethod> mirrored = mirrorable(bound);
+                PsiMethod[] declared = created.getConstructors();
+                for (int i = 0; i < declared.length && i < mirrored.size(); i++) {
+                    declared[i].putUserData(MIRRORED, mirrored.get(i));
+                }
+            }
+            if (reentrant) return created;
+            PsiClass raced = cache.putIfAbsent(key, created);
+            return raced != null ? raced : created;
+        } finally {
+            if (!reentrant) {
+                building.remove(key);
+                if (building.isEmpty()) BUILDING.remove();
+            }
+        }
+    }
+
+    /**
+     * Mirrors the binding's constructors, as the engine instantiates an alias through the
+     * constructors of its binding: {@code new LINK(entity)} needs {@code Link(ENTITY)}.
+     * Mirrors are public; {@link JypeTypeSystemAnnotator} applies the binding constructor's own
+     * access at each creation, which a mirror declared in the alias's package could not express.
+     * Interfaces and generic constructors contribute nothing; the implicit default constructor
+     * remains when the binding declares none.
+     */
+    private static String constructors(String name, @Nullable PsiClass bound) {
+        StringBuilder result = new StringBuilder();
+        for (PsiMethod constructor : mirrorable(bound)) {
+            StringJoiner parameters = new StringJoiner(", ");
+            StringJoiner arguments = new StringJoiner(", ");
+            PsiParameter[] declared = constructor.getParameterList().getParameters();
+            for (int i = 0; i < declared.length; i++) {
+                parameters.add(declared[i].getType().getCanonicalText() + " p" + i);
+                arguments.add("p" + i);
+            }
+            result.append(" public ").append(name).append("(").append(parameters)
+                    .append(") { super(").append(arguments).append("); }");
+        }
+        return result.toString();
+    }
+
+    private static List<PsiMethod> mirrorable(@Nullable PsiClass bound) {
+        if (bound == null || bound.isInterface()) return List.of();
+        List<PsiMethod> result = new ArrayList<>();
+        for (PsiMethod constructor : bound.getConstructors()) {
+            if (!constructor.hasTypeParameters()) result.add(constructor);
+        }
+        return result;
     }
 
     /**

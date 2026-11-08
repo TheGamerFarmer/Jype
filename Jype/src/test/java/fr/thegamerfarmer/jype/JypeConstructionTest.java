@@ -419,6 +419,10 @@ class JypeConstructionTest {
     @Test
     void singletonsCreateThroughNonPublicConstructors() throws Exception {
         Path single = compile(SINGLETONS, "single", LENIENT);
+        String holder = Files.readString(single.resolve("single").resolve("Jype$New$SERVICE.java"));
+        assertTrue(holder.contains("J$constructor("), holder);
+        // Bytecode tools that recompute stack maps without the JDK widen multi-catch variables to Object.
+        assertFalse(java.util.regex.Pattern.compile("catch \\([^)]*\\|").matcher(holder).find(), holder);
         try (URLClassLoader loader = loader(single)) {
             Object service = staticCall(loader, "single.core.Service", "shared");
             assertEquals("single.core.Service", service.getClass().getName());

@@ -351,7 +351,12 @@ final class ConstructionFactories {
         write(holder, source.toString(), binding);
     }
 
-    /** Helpers of generated classes reaching non-public constructors; the target's failures propagate unchanged. */
+    /**
+     * Helpers of generated classes reaching non-public constructors; the target's failures propagate
+     * unchanged. Every handler catches a single class: bytecode tools that recompute stack maps
+     * without the JDK on their library path (ProGuard without {@code -libraryjars}) widen a
+     * multi-catch variable to {@code Object}, which the JVM verifier rejects.
+     */
     private static final String REFLECTION = """
 
                 private static java.lang.reflect.Constructor<?> J$constructor(Class<?> type, Class<?>... parameters) {
@@ -359,7 +364,7 @@ final class ConstructionFactories {
                         java.lang.reflect.Constructor<?> constructor = type.getDeclaredConstructor(parameters);
                         constructor.setAccessible(true);
                         return constructor;
-                    } catch (ReflectiveOperationException | RuntimeException e) {
+                    } catch (Exception e) {
                         throw new IllegalStateException("[Jype] Cannot access the constructor of " + type.getName() + ".", e);
                     }
                 }

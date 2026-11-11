@@ -265,7 +265,7 @@ public final class JypeTypeSystemReader {
         try {
             String source = "package " + system.pkg() + "; public class " + definition.name()
                     + clause + definition.boundFqn() + templateArguments(project, system, bound)
-                    + " {" + (reentrant ? "" : constructors(definition.name(), bound)) + "}";
+                    + " {" + (reentrant ? "" : constructors(project, system, definition.name(), bound)) + "}";
             PsiJavaFile file = (PsiJavaFile) PsiFileFactory.getInstance(project)
                     .createFileFromText(definition.name() + ".java", JavaFileType.INSTANCE, source);
             ((com.intellij.psi.impl.source.PsiFileImpl) file)
@@ -292,34 +292,91 @@ public final class JypeTypeSystemReader {
     }
 
     /**
+     * Whether {@code cls} is bound to an alias of a specialized system (one that inherits and
+     * declares its own definitions). The engine keeps such a class a binding even when its body
+     * names aliases; only template-valued aliases stay open in it.
+     */
+    static boolean isSpecializedBinding(@NotNull PsiClass cls, @NotNull Result system) {
+        String name = cls.getQualifiedName();
+        if (name == null || system.error() != null) return false;
+        String parent = stringValue(system.declaration().findDeclaredAttributeValue("inherit"));
+        PsiAnnotationMemberValue overrides = system.declaration().findDeclaredAttributeValue("overrides");
+        if (parent == null || parent.isEmpty() || overrides == null
+                || !(overrides instanceof PsiAnnotation)
+                && com.intellij.psi.util.PsiTreeUtil.findChildOfType(overrides, PsiAnnotation.class) == null) {
+            return false;
+        }
+        for (TypeDefInfo definition : system.typeDefs()) {
+            if (definition.boundFqn().equals(name)) return true;
+        }
+        return false;
+    }
+
+    /**
      * Mirrors the binding's constructors, as the engine instantiates an alias through the
      * constructors of its binding: {@code new LINK(entity)} needs {@code Link(ENTITY)}.
      * Mirrors are public; {@link JypeTypeSystemAnnotator} applies the binding constructor's own
      * access at each creation, which a mirror declared in the alias's package could not express.
      * Interfaces and generic constructors contribute nothing; the implicit default constructor
      * remains when the binding declares none.
+     *
+     * <p>A template binding's parameters are written with the arguments the alias extends it with
+     * (see {@link #templateArguments}): {@code Command(Handler<PLAYER, …>)} becomes
+     * {@code COMMAND(Handler<game.GamePlayer, …>)}, the type the engine's factory accepts.
      */
-    private static String constructors(String name, @Nullable PsiClass bound) {
+    private static String constructors(Project project, Result system, String name, @Nullable PsiClass bound) {
+        Map<String, String> arguments = templateArgumentMap(project, system, bound);
         StringBuilder result = new StringBuilder();
         for (PsiMethod constructor : mirrorable(bound)) {
             StringJoiner parameters = new StringJoiner(", ");
-            StringJoiner arguments = new StringJoiner(", ");
+            StringJoiner passed = new StringJoiner(", ");
             PsiParameter[] declared = constructor.getParameterList().getParameters();
             for (int i = 0; i < declared.length; i++) {
-                parameters.add(declared[i].getType().getCanonicalText() + " p" + i);
-                arguments.add("p" + i);
+                parameters.add(render(declared[i].getType(), bound, arguments) + " p" + i);
+                passed.add("p" + i);
             }
             result.append(" public ").append(name).append("(").append(parameters)
-                    .append(") { super(").append(arguments).append("); }");
+                    .append(") { super(").append(passed).append("); }");
         }
         return result.toString();
     }
 
+    /** Canonical text of {@code type}, with the type parameters of {@code owner} replaced by their arguments. */
+    private static String render(PsiType type, @Nullable PsiClass owner, Map<String, String> arguments) {
+        if (arguments.isEmpty()) return type.getCanonicalText();
+        if (type instanceof PsiEllipsisType ellipsis) return render(ellipsis.getComponentType(), owner, arguments) + "...";
+        if (type instanceof PsiArrayType array) return render(array.getComponentType(), owner, arguments) + "[]";
+        if (type instanceof PsiWildcardType wildcard) {
+            if (!wildcard.isBounded()) return "?";
+            return (wildcard.isExtends() ? "? extends " : "? super ")
+                    + render(wildcard.getBound(), owner, arguments);
+        }
+        if (!(type instanceof PsiClassType cls)) return type.getCanonicalText();
+        PsiClass target = cls.resolve();
+        if (target instanceof PsiTypeParameter parameter) {
+            String replacement = arguments.get(parameter.getName());
+            return replacement != null && parameter.getOwner() == owner ? replacement : type.getCanonicalText();
+        }
+        if (target == null || target.getQualifiedName() == null) return type.getCanonicalText();
+        PsiType[] parameters = cls.getParameters();
+        if (parameters.length == 0) return target.getQualifiedName();
+        StringJoiner rendered = new StringJoiner(", ", "<", ">");
+        for (PsiType parameter : parameters) rendered.add(render(parameter, owner, arguments));
+        return target.getQualifiedName() + rendered;
+    }
+
+    /**
+     * Declared constructors only. {@code getConstructors()} would ask the augment providers for the
+     * binding's members; for a source binding with Jype parents, completing them materializes this
+     * package's aliases again, which re-enters the virtual class being built.
+     */
     private static List<PsiMethod> mirrorable(@Nullable PsiClass bound) {
         if (bound == null || bound.isInterface()) return List.of();
+        List<PsiMethod> declared = bound instanceof com.intellij.psi.impl.source.PsiExtensibleClass extensible
+                ? extensible.getOwnMethods() : Arrays.asList(bound.getConstructors());
         List<PsiMethod> result = new ArrayList<>();
-        for (PsiMethod constructor : bound.getConstructors()) {
-            if (!constructor.hasTypeParameters()) result.add(constructor);
+        for (PsiMethod constructor : declared) {
+            if (constructor.isConstructor() && !constructor.hasTypeParameters()) result.add(constructor);
         }
         return result;
     }
@@ -331,19 +388,25 @@ public final class JypeTypeSystemReader {
      * other aliases as their virtual class; a bound naming a non-alias parameter stays raw.
      */
     private static String templateArguments(Project project, Result system, @Nullable PsiClass bound) {
-        if (bound == null || !bound.hasTypeParameters()) return "";
+        Map<String, String> arguments = templateArgumentMap(project, system, bound);
+        return arguments.isEmpty() ? "" : "<" + String.join(", ", arguments.values()) + ">";
+    }
+
+    /** The arguments of {@link #templateArguments} by parameter name, in order; empty when the bound stays raw. */
+    private static Map<String, String> templateArgumentMap(Project project, Result system, @Nullable PsiClass bound) {
+        if (bound == null || !bound.hasTypeParameters()) return Map.of();
         Map<String, TypeDefInfo> definitions = new HashMap<>();
         system.typeDefs().forEach(definition -> definitions.put(definition.name(), definition));
-        List<String> arguments = new ArrayList<>();
+        Map<String, String> arguments = new LinkedHashMap<>();
         for (PsiTypeParameter parameter : bound.getTypeParameters()) {
             TypeDefInfo definition = definitions.get(parameter.getName());
-            if (definition == null) return "";
+            if (definition == null) return Map.of();
             PsiClass binding = JavaPsiFacade.getInstance(project)
                     .findClass(definition.boundFqn(), system.declaration().getResolveScope());
-            arguments.add(binding != null && !isVirtualClass(binding) && !binding.hasTypeParameters()
+            arguments.put(parameter.getName(), binding != null && !isVirtualClass(binding) && !binding.hasTypeParameters()
                     ? definition.boundFqn() : system.pkg() + "." + definition.name());
         }
-        return "<" + String.join(", ", arguments) + ">";
+        return arguments;
     }
 
     /** Finds the class's package system, then follows its superclass with identity-cycle protection. */

@@ -142,10 +142,16 @@ final class PreEnterTransformer {
         inheritance.residual(List.of(), Set.of());
 
         if (!managedNames.isEmpty()) {
+            // Bindings of a specialized system stay bindings even when their body uses aliases.
+            Set<String> localBindings = specializedInheritedSystem
+                    ? new HashSet<>(staticResolver.bounds.getOrDefault(hierarchy.currentTypeSystem, Map.of()).values())
+                    : Set.of();
+            java.util.function.Predicate<JCTree.JCClassDecl> binding =
+                    cls -> localBindings.contains(hierarchy.classNames.get(cls));
             for (JCTree.JCCompilationUnit cu : cus) {
                 for (JCTree def : cu.defs) {
                     if (def instanceof JCTree.JCClassDecl cls && hierarchy.activeRoots.contains(cls)) {
-                        injectBodyDetectedTypeParams(cls, managedNames, make, names);
+                        injectBodyDetectedTypeParams(cls, managedNames, binding, make, names);
                     }
                 }
             }

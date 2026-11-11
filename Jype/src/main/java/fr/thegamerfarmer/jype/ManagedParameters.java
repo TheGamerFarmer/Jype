@@ -26,19 +26,26 @@ final class ManagedParameters {
      *
      * <p>Rule: if one managed name is used in the body, all managed names are
      * injected because each one's F-bounds depend on the others.
+     *
+     * <p>Classes matched by {@code binding} are skipped: in a specialized type system, a class
+     * bound to an alias must stay a binding (it later receives only the residual aliases),
+     * whatever aliases its body uses. Turning it into a template over every managed name would
+     * leave its own alias open in every class that uses it.
      */
     static void injectBodyDetectedTypeParams(JCTree.JCClassDecl cls,
                                                Set<String> managedNames,
+                                               java.util.function.Predicate<JCTree.JCClassDecl> binding,
                                                TreeMaker make, Names names) {
         // Recurse into inner classes first.
         for (JCTree member : cls.defs) {
             if (member instanceof JCTree.JCClassDecl inner) {
-                injectBodyDetectedTypeParams(inner, managedNames, make, names);
+                injectBodyDetectedTypeParams(inner, managedNames, binding, make, names);
             }
         }
 
         // Enums cannot be generic: StaticTypeSupport binds the aliases they use instead.
         if ((cls.mods.flags & com.sun.tools.javac.code.Flags.ENUM) != 0) return;
+        if (binding.test(cls)) return;
 
         // Already-declared parameters.
         Set<String> declared = new LinkedHashSet<>();

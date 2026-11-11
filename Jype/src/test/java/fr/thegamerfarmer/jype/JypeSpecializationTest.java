@@ -19,6 +19,8 @@ import static org.junit.jupiter.api.Assertions.*;
 class JypeSpecializationTest {
     private static final String[] STRICT = {"-Xplugin:Jype", "-processor",
             "fr.thegamerfarmer.jype.JypeProcessorShim", "-Xlint:rawtypes,unchecked", "-Werror"};
+    /** Static code naming a class templated over a residual alias uses it raw, as consumers do. */
+    private static final String[] LENIENT = Arrays.copyOf(STRICT, STRICT.length - 1);
 
     private static final Map<String, String> API = Map.of(
             "api/package-info.java", """
@@ -150,9 +152,89 @@ class JypeSpecializationTest {
         }
     }
 
+    /**
+     * A consumer binding that creates a residual alias in its body ({@code new CLUSTER()}) stays a
+     * binding: it receives only the residual aliases, never every managed name. Otherwise the
+     * overridden alias cannot be closed and subclasses of the classes using it lose a parameter.
+     */
+    @Test
+    void bindingCreatingAResidualAliasStaysABinding() throws Exception {
+        Map<String, String> api = new HashMap<>(Map.of(
+                "api/package-info.java", """
+                        @fr.thegamerfarmer.jype.annotations.TypeSystem({
+                            @fr.thegamerfarmer.jype.annotations.TypeDef(name="ENTITY", bound=ApiEntity.class),
+                            @fr.thegamerfarmer.jype.annotations.TypeDef(name="CLUSTER", bound=Cluster.class),
+                            @fr.thegamerfarmer.jype.annotations.TypeDef(name="REGISTRY", bound=Registry.class)
+                        }) package api;
+                        """,
+                "api/Registry.java", """
+                        package api;
+                        public class Registry {
+                            public CLUSTER main;
+                            public void create() { main = new CLUSTER(); }
+                        }
+                        """,
+                "api/Power.java", """
+                        package api;
+                        public abstract class Power {
+                            protected REGISTRY registry;
+                            protected ENTITY owner;
+                            public String describe() { return owner == null ? "none" : owner.name(); }
+                        }
+                        """));
+        api.putAll(Map.of("api/ApiEntity.java", API.get("api/ApiEntity.java"),
+                "api/Cluster.java", API.get("api/Cluster.java")));
+        Path apiClasses = compile(api, "api");
+        Path impl = compile(Map.of(
+                "impl/package-info.java", """
+                        @fr.thegamerfarmer.jype.annotations.TypeSystem(inherit="api", overrides={
+                            @fr.thegamerfarmer.jype.annotations.TypeDef(name="ENTITY", bound=AppEntity.class),
+                            @fr.thegamerfarmer.jype.annotations.TypeDef(name="REGISTRY", bound=AppRegistry.class)
+                        }) package impl;
+                        """,
+                "impl/AppEntity.java", GAME.get("impl/AppEntity.java"),
+                "impl/AppRegistry.java", """
+                        package impl;
+                        public class AppRegistry extends api.Registry {
+                            public CLUSTER extra;
+                            @Override public void create() { super.create(); extra = new CLUSTER(); }
+                        }
+                        """,
+                "impl/AppPower.java", """
+                        package impl;
+                        public abstract class AppPower extends api.Power {
+                            public boolean ready() { return registry != null; }
+                        }
+                        """,
+                "impl/Sophist.java", """
+                        package impl;
+                        public class Sophist extends AppPower {
+                            public String run() { owner = new AppEntity(); return describe(); }
+                        }
+                        """,
+                "impl/ProdigalSon.java", """
+                        package impl;
+                        public class ProdigalSon extends Sophist {
+                            public static String main() {
+                                AppRegistry registry = new AppRegistry();
+                                registry.create();
+                                return new ProdigalSon().run() + (registry.extra != null) + new ProdigalSon().ready();
+                            }
+                        }
+                        """), "impl", LENIENT, apiClasses);
+        try (URLClassLoader loader = loader(impl, apiClasses)) {
+            assertEquals("impltruefalse", loader.loadClass("impl.ProdigalSon").getMethod("main").invoke(null));
+        }
+    }
+
     private Path compile(Map<String, String> sources, String name, Path... dependencies) throws Exception {
+        return compile(sources, name, STRICT, dependencies);
+    }
+
+    private Path compile(Map<String, String> sources, String name, String[] options, Path... dependencies)
+            throws Exception {
         Path output = root.resolve(name).resolve("classes");
-        JypeTestCompiler.compileTo(sources, output, List.of(dependencies), STRICT).assertSuccess();
+        JypeTestCompiler.compileTo(sources, output, List.of(dependencies), options).assertSuccess();
         return output;
     }
 

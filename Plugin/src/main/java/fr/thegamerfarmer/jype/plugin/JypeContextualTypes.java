@@ -151,7 +151,8 @@ final class JypeContextualTypes {
     /**
      * Like the engine, an alias bound to a class without type parameters is that class itself
      * (for example {@code ENTITY} is {@code ConcreteNode}); only template bounds remain virtual aliases.
-     * A class naming aliases itself is a template for the engine, so its aliases stay virtual.
+     * A class naming aliases itself is a template for the engine, so its aliases stay virtual, unless
+     * it is the binding of an alias in a specialized system: the engine keeps such a class a binding.
      */
     private static PsiType binding(PsiJavaCodeReferenceElement reference, JypeTypeSystemReader.Result system,
                                    JypeTypeSystemReader.TypeDefInfo definition, PsiElementFactory factory) {
@@ -170,6 +171,7 @@ final class JypeContextualTypes {
         system.typeDefs().forEach(definition -> aliases.add(definition.name()));
         for (PsiClass cls = PsiTreeUtil.getContextOfType(context, PsiClass.class, true); cls != null;
              cls = PsiTreeUtil.getContextOfType(cls, PsiClass.class, true)) {
+            if (JypeTypeSystemReader.isSpecializedBinding(cls, system)) continue;
             PsiClass owner = cls;
             Set<String> names = CachedValuesManager.getCachedValue(owner, () -> CachedValueProvider.Result.create(
                     typeReferenceNames(owner), PsiModificationTracker.MODIFICATION_COUNT));

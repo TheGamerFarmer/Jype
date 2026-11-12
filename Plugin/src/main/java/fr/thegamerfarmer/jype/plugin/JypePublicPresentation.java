@@ -43,10 +43,19 @@ final class JypePublicPresentation {
     }
 
     static String parameters(PsiMethod method) {
-        return Arrays.stream(method.getParameterList().getParameters())
-                .map(parameter -> type(parameter.getType()) + " "
-                        + Objects.requireNonNullElse(parameter.getName(), "arg"))
-                .collect(Collectors.joining(", "));
+        return parameters(method, method);
+    }
+
+    /** Parameters of {@code method}, named as in {@code named} when it declares as many. */
+    private static String parameters(PsiMethod method, PsiMethod named) {
+        PsiParameter[] parameters = method.getParameterList().getParameters();
+        PsiParameter[] names = named.getParameterList().getParameters();
+        if (names.length != parameters.length) names = parameters;
+        StringJoiner result = new StringJoiner(", ");
+        for (int i = 0; i < parameters.length; i++) {
+            result.add(type(parameters[i].getType()) + " " + Objects.requireNonNullElse(names[i].getName(), "arg"));
+        }
+        return result.toString();
     }
 
     static String memberType(PsiModifierListOwner member, PsiType actual) {
@@ -54,6 +63,14 @@ final class JypePublicPresentation {
     }
 
     static String signature(PsiElement element) {
+        return signature(element, element);
+    }
+
+    /**
+     * @param named declaration supplying the parameter names, such as the attached source of a
+     *              compiled method whose class file does not retain them
+     */
+    static String signature(PsiElement element, PsiElement named) {
         if (element instanceof PsiClass cls) {
             JypeClassMetadata.Data data = JypeClassMetadata.read(cls);
             String kind = cls.isAnnotationType() ? "@interface" : cls.isInterface() ? "interface"
@@ -71,7 +88,7 @@ final class JypePublicPresentation {
             String result = modifiers(method) + generics;
             if (!generics.isEmpty()) result += " ";
             if (!method.isConstructor()) result += memberType(method, method.getReturnType()) + " ";
-            result += method.getName() + "(" + parameters(method) + ")";
+            result += method.getName() + "(" + parameters(method, named instanceof PsiMethod source ? source : method) + ")";
             PsiClassType[] exceptions = method.getThrowsList().getReferencedTypes();
             if (exceptions.length > 0) result += " throws " + Arrays.stream(exceptions)
                     .map(JypePublicPresentation::type).collect(Collectors.joining(", "));

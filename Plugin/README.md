@@ -161,6 +161,25 @@ generics and their bounds remain visible. The documentation keeps Java's
 comment content and provides links to the Jype aliases; both the declaration
 and the containing-class presentation omit technical expansions.
 
+A consumer reaches library declarations through its own types too: a member
+inherited by a consumer class (`bgPlayer.getRole()`), an alias class and its
+constructors (`new COMMAND(…)`). Their documentation is the library
+declaration's — `public APICommand command()` in its declaring class, with its
+comment — never the consumer-typed expansion such as
+`APICommand<BGPlayer, BGRole, …>`. An alias class shows its public signature
+(`public class COMMAND extends APICommand`), and `new ALIAS(…)` the binding's
+constructors. A declaration of the attached sources is documented as its class
+file, so its container never lists the class file's technical parameters.
+
+Compiled Jype classes reach their attached sources even when IntelliJ's own
+pairing fails: when an obfuscator rewrites the `SourceFile` attribute (ProGuard's
+`-renamesourcefileattribute SourceFile`), the source is found as
+`package/TopLevelName.java` in the library's source roots, and a method whose
+parameters name aliases is paired through its public parameter types. This also
+fixes Go to Declaration. When the source is attached, the documentation is its
+comment rather than the library's HTML javadoc, which documents the expanded
+declaration with every technical parameter.
+
 Versioned `JypeMember` metadata preserves the original return and field type
 syntax, including aliases erased by static lowering. It also distinguishes
 injected method parameters and technical helpers from ordinary generic

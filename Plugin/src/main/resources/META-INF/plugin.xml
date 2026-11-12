@@ -30,6 +30,8 @@
   <extensions defaultExtensionNs="com.intellij">
     <lang.documentationProvider language="JAVA" order="first"
         implementationClass="fr.thegamerfarmer.jype.plugin.JypeDocumentationProvider"/>
+    <psi.clsCustomNavigationPolicy
+        implementation="fr.thegamerfarmer.jype.plugin.JypeSourceNavigation"/>
     <lang.parameterInfo language="JAVA" order="first"
         implementationClass="fr.thegamerfarmer.jype.plugin.JypeParameterInfoHandler"/>
     <completion.contributor language="JAVA" order="first"
